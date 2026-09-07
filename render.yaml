@@ -1,0 +1,212 @@
+# Render Blueprint — free-tier demonstration deployment.
+#
+# WHAT THIS IS FOR. A demonstration and UAT environment for 10–15 users, running
+# entirely on free tiers. It is NOT the production topology: `05-infrastructure.md`
+# §2 describes a single VPS running `docker-compose.prod.yml` behind Nginx, and
+# that remains the deployment this system is designed for. Nothing here replaces
+# it, and the two are configured from the same environment variables so an
+# application built for one runs unchanged on the other.
+#
+# WHAT IS NOT HERE, AND WHY.
+#
+#   Postgres  Render's own free Postgres is DELETED after 30 days. Neon's free
+#             tier is not, so the database lives there and reaches this blueprint
+#             as a connection string.
+#   Redis     Render has no free Redis (Key Value). Upstash does, speaks the
+#             Redis protocol, and `ioredis` connects to it unchanged.
+#   Manual    `apps/manual` is a separate repository, already deployed to Vercel.
+#
+# BOTH ARE SET BY HAND — see `deploy/RENDER.md`. Neither can be generated here,
+# because neither is a Render resource.
+#
+# THE FREE TIER SLEEPS. A free web service stops after 15 minutes without a
+# request and takes roughly 50 seconds to wake. For a demonstration that matters,
+# keep it warm with an external ping — the guide says how. Render's own cron jobs
+# are a paid feature, which is why one is not declared here.
+#
+# ATTACHMENTS DO NOT SURVIVE A RESTART. `STORAGE_PATH` is a container path, and a
+# free instance has no persistent disk (`05-infrastructure.md` §5.2 requires one
+# in production, and gets it from a host bind mount there). Uploaded files are
+# lost whenever the instance restarts, sleeps or redeploys. Acceptable for a
+# demonstration; state it to anyone who uploads something they care about.
+
+services:
+  # --- API ---------------------------------------------------------------------
+  # The same image production uses. `apps/api/Dockerfile` runs the Express API and
+  # the BullMQ worker in one process (§7.3) and deliberately does NOT run
+  # migrations on boot (§11.2) — see the guide for where they run instead.
+  - type: web
+    name: asset-management-api
+    runtime: docker
+    plan: free
+    # Closest region to an Indonesian institution. Jakarta is ~10–30 ms away;
+    # the US regions are 200 ms+, which is felt on every request.
+    region: singapore
+    dockerfilePath: ./apps/api/Dockerfile
+    # The repository ROOT, not `apps/api`: the Dockerfile copies the workspace
+    # lockfile and `rincian_asset.csv` from there.
+    dockerContext: .
+    # `/api/health`, outside `/api/v1` and unauthenticated by design
+    # (`src/routes/health.js`). Render polls it to decide the deploy succeeded.
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Render injects the port it wants the service to listen on. The config
+      # reads `PORT` (`src/config/index.js`), so the two already agree.
+      - key: PORT
+        value: 3000
+
+      # --- Set by hand, in the Render dashboard ---------------------------------
+      # `sync: false` means "ask me, do not store it in the repository". These
+      # are credentials for services Render does not manage.
+
+      # Neon. Must carry `?sslmode=require` — see the guide.
+      - key: DATABASE_URL
+        sync: false
+
+      # Upstash. Note `rediss://` — two s, TLS. `redis://` will not connect.
+      - key: REDIS_URL
+        sync: false
+
+      # The static site's URL, known only after its first deploy. A wildcard is
+      # refused by the config (§12.3), so this is a real origin or nothing works.
+      - key: CORS_ORIGIN
+        sync: false
+
+      # --- Generated ------------------------------------------------------------
+      # Render mints these once and keeps them. They must differ from each other,
+      # which `loadConfig` enforces at boot; two independent values satisfy it.
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+
+      # --- Fixed ----------------------------------------------------------------
+      - key: JWT_ACCESS_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+
+      # The image creates `/storage/attachments` and runs as `node`, which owns
+      # it. Ephemeral here — see the note at the top of this file.
+      - key: STORAGE_PATH
+        value: /storage/attachments
+
+      # No schema default (`src/config/index.js`), so the container refuses to
+      # boot without it. 10 MB matches §5.3.
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 10
+
+      # `CR-012`, REQ-COND-006. This is the default the schema already applies;
+      # it is stated explicitly so the deployment's calendar is visible rather
+      # than implied.
+      - key: BUSINESS_TIMEZONE
+        value: Asia/Jakarta
+
+      # The overdue sweep and the assessment feature share the worker process.
+      # Left on: a deployment that silently stops writing OVERDUE is a quiet
+      # correctness bug (REQ-BORROW-012).
+      - key: JOBS_ENABLED
+        value: 'true'
+
+  # --- Web ---------------------------------------------------------------------
+  # A static site, not the `apps/web/Dockerfile` image: that image exists to be
+  # served by Nginx behind a TLS-terminating front (§2), and Render's static
+  # hosting already does both. The built output is identical either way.
+  #
+  # Static sites do NOT sleep and are not rate-limited on the free tier, so the
+  # only thing a visitor waits for is the API waking up.
+  - type: web
+    name: asset-management-web
+    runtime: static
+    # NO `region`. Render serves a static site from its global CDN rather than
+    # from one instance, so the field is rejected outright — there is nowhere for
+    # it to be. Only the API below is regional, which is the one that matters:
+    # the bundle is cached at an edge near the visitor either way, and every
+    # request that carries data goes to Singapore.
+    #
+    # The whole workspace installs, because the web app builds from the root
+    # lockfile. `--include-workspace-root` matches `apps/web/Dockerfile`.
+    buildCommand: npm ci --workspace apps/web --include-workspace-root && npm run build --workspace apps/web
+    staticPublishPath: ./apps/web/dist
+    autoDeploy: true
+    envVars:
+      # RELATIVE, because the API is proxied onto this same origin by the first
+      # route below. Nothing to paste after the first deploy, and nothing that
+      # can be wrong: a relative base cannot point at the wrong host.
+      #
+      # Still build-time — Vite inlines `VITE_*` into the bundle — but it no
+      # longer depends on a URL that does not exist yet, so the two services no
+      # longer have to be deployed in a particular order.
+      - key: VITE_API_BASE_URL
+        value: /api/v1
+    routes:
+      # --- THE API, ON THIS ORIGIN ---------------------------------------------
+      #
+      # WHY THIS EXISTS, AND WHY IT IS FIRST.
+      #
+      # The refresh token is an httpOnly cookie set `SameSite=Strict`
+      # (`05-infrastructure.md` §6.1, `routes/v1/auth.js`). A browser returns
+      # such a cookie only when the API host is the SAME SITE as the page.
+      #
+      # `onrender.com` is on the Public Suffix List, so
+      # `asset-management-web.onrender.com` and `asset-management-api.onrender.com`
+      # are different SITES — not merely different origins. Calling the API
+      # directly would mean the refresh cookie is never sent back, every page
+      # reload would fail to restore the session, and the user would be returned
+      # to the login screen each time. No environment variable fixes that.
+      #
+      # Proxying the API onto this origin makes the two same-site, so `Strict`
+      # keeps working and §6.1's CSRF protection is preserved rather than traded
+      # away. It also removes cross-origin requests entirely, so CORS stops being
+      # load-bearing for the browser path.
+      #
+      # ORDER MATTERS. Render evaluates routes top down, and the SPA catch-all
+      # below matches everything — including `/api/...`. This rule must come
+      # first or every API call is answered with `index.html`, which fails as a
+      # JSON parse error a long way from its cause.
+      #
+      # THE DESTINATION IS A LITERAL HOSTNAME, AND IT IS NOT THE SERVICE NAME.
+      #
+      # A blueprint cannot reference another service's URL — `fromService` works
+      # for environment variables and not for routes — so this is written out.
+      # Render appends a suffix when the plain name is already taken globally,
+      # which it was: the service is `asset-management-api`, and its hostname is
+      # `asset-management-api-10z4.onrender.com`.
+      #
+      # Read it off the top of the API's own page in the dashboard rather than
+      # assuming it matches the name above. Getting it wrong fails in a way that
+      # looks like a broken proxy: `/api/...` returns a bare `404 Not Found`
+      # while every other path still serves the app correctly, because the
+      # rewrite IS matching and forwarding to a hostname with nothing behind it.
+      - type: rewrite
+        source: /api/*
+        # THE WILDCARD IS `*` IN THE DESTINATION, NOT `:splat`. Render
+        # substitutes the whole string captured by `*` in the source. `:splat`
+        # is Netlify's spelling; Render forwards it VERBATIM, and the API then
+        # answers `Cannot GET /api/:splat` — which at least names the mistake.
+        destination: https://asset-management-api-10z4.onrender.com/api/*
+
+      # A data-router SPA: every route below `/` is resolved by React Router in
+      # the browser, so a hard refresh on `/assets/123` must still be served
+      # `index.html` rather than a 404. This is the static-host equivalent of
+      # `try_files $uri /index.html` in `deploy/nginx/app.conf`.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # The security headers `deploy/nginx/security-headers.conf` sets in the
+      # production topology, restated here because Render serves the files
+      # directly and that Nginx config is not in the path.
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin

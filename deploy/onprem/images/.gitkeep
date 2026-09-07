@@ -1,0 +1,2 @@
+Image tarballs are written here by scripts/build-images.sh and are NOT committed
+(see ../.gitignore). Transfer them to the server separately.

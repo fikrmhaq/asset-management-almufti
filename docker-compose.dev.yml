@@ -1,0 +1,105 @@
+# Development stack (05-infrastructure.md §10.1).
+#
+# Two supported workflows:
+#
+#   Datastores only (recommended on Windows — app runs on the host):
+#     npm run docker:up      # postgres + redis
+#     npm run dev            # api + web with hot reload on the host
+#
+#   Everything in Docker:
+#     npm run docker:up:all  # postgres + redis + api + web, hot reload via bind mounts
+#
+# Postgres and Redis publish ports to localhost in development only. In
+# production neither is bind-published to the host (05-infrastructure.md §12.2).
+
+name: asset-management-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-asset_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-asset_app_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-asset_management}
+    ports:
+      # Host port is configurable: a native PostgreSQL already listening on 5432
+      # would otherwise shadow this mapping. Set POSTGRES_PORT in .env to move it.
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -U ${POSTGRES_USER:-asset_app} -d ${POSTGRES_DB:-asset_management}',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Append-only persistence so sessions and queued jobs survive a restart
+    # (05-infrastructure.md §2 callout, §6.2, §7.3).
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile.dev
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: '3000'
+      # Service names, not localhost — these resolve on the Compose network.
+      DATABASE_URL: postgres://${POSTGRES_USER:-asset_app}:${POSTGRES_PASSWORD:-asset_app_dev}@postgres:5432/${POSTGRES_DB:-asset_management}
+      REDIS_URL: redis://redis:6379
+      STORAGE_PATH: /storage/attachments
+      MAX_UPLOAD_SIZE_MB: '10'
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./apps/api:/app/apps/api
+      # Keep container-installed dependencies from being shadowed by the host mount.
+      - api-node-modules:/app/node_modules
+      # Attachment storage is a bind mount, never container-local
+      # (05-infrastructure.md §5.4).
+      - ./storage:/storage
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    restart: unless-stopped
+    environment:
+      VITE_API_BASE_URL: http://localhost:3000/api/v1
+    ports:
+      - '5173:5173'
+    volumes:
+      - ./apps/web:/app/apps/web
+      - web-node-modules:/app/node_modules
+
+volumes:
+  postgres-data:
+  redis-data:
+  api-node-modules:
+  web-node-modules:

@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build output
+dist/
+build/
+coverage/
+
+# Environment (never commit real secrets — see .env.example)
+.env
+.env.local
+.env.*.local
+apps/api/.env
+apps/web/.env
+
+# Runtime / uploaded files (bind-mounted into the app container).
+# Ignore the contents but keep the directory tracked — a re-negation inside an
+# already-excluded directory does not work, so each level is excluded explicitly.
+/storage/*
+!/storage/attachments/
+/storage/attachments/*
+!/storage/attachments/.gitkeep
+
+# Database dumps. These contain every row of real data, password hashes
+# included, so they must never reach the repository.
+/backups/
+
+# Logs
+*.log
+npm-debug.log*
+logs/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test / tooling caches
+.vitest/
+.eslintcache
+*.tsbuildinfo
+
+apps/api/node_modules/
+apps/web/node_modules/
+
+docs/
+template/
+
+# Local scratch workspace — not part of the deliverable.
+apps/learning/
+
+asset_app.sql

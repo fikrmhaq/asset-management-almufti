@@ -1,0 +1,22 @@
+# Line endings.
+#
+# This repository is authored on Windows and deployed to Linux — the on-prem
+# package is copied to the server by zip, USB or scp. A shell script checked
+# out with CRLF arrives there broken, failing as
+#
+#   ./backup.sh: /bin/bash^M: bad interpreter: No such file or directory
+#
+# which reads as a missing interpreter rather than a line-ending problem.
+# Forcing LF on everything the server executes or parses removes that entirely.
+
+* text=auto eol=lf
+
+# PowerShell is the exception: it runs on Windows, where CRLF is conventional.
+*.ps1 text eol=crlf
+
+# Binary — never touch these.
+*.pdf  binary
+*.xlsx binary
+*.png  binary
+*.jpg  binary
+*.ico  binary

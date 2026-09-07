@@ -1,0 +1,19 @@
+# The filled configuration: database password and both signing secrets.
+.env
+
+# Image tarballs. These are 300–500 MB and do not belong in Git — GitHub rejects
+# any file over 100 MB outright. Build them with scripts/build-images.sh and
+# move them to the server by USB, scp or a file share.
+images/*.tar
+images/*.tar.gz
+!images/.gitkeep
+
+# Certificates and private keys, if generated inside the package directory.
+certs/
+*.key
+*.crt
+*.pem
+
+# Python bytecode from build-handover-pdf.py.
+__pycache__/
+*.pyc

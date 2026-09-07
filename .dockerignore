@@ -1,0 +1,17 @@
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+**/coverage
+storage
+.git
+.env
+.env.*
+!.env.example
+*.log
+docs
+# Large legacy reference dump — never needed inside an image.
+asset_app.sql
+apps/manual
+

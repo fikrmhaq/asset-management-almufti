@@ -1,0 +1,45 @@
+{
+  "name": "asset-management",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Institutional Asset Management System — monorepo root",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently --names api,web --prefix-colors cyan,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "start": "npm run start --workspace apps/api",
+    "build": "npm run build --workspace apps/web",
+    "test": "npm run test --workspaces --if-present",
+    "test:api": "npm run test --workspace apps/api",
+    "test:web": "npm run test --workspace apps/web",
+    "test:db": "npm run test:db --workspace apps/api",
+    "db:migrate": "npm run db:migrate --workspace apps/api",
+    "db:migrate:status": "npm run db:migrate:status --workspace apps/api",
+    "db:migrate:undo:all": "npm run db:migrate:undo:all --workspace apps/api",
+    "db:seed": "npm run db:seed --workspace apps/api",
+    "db:seed:undo:all": "npm run db:seed:undo:all --workspace apps/api",
+    "lint": "npm run lint --workspaces --if-present",
+    "lint:fix": "npm run lint:fix --workspaces --if-present",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check:services": "npm run check:services --workspace apps/api",
+    "bootstrap": "npm run bootstrap --workspace apps/api",
+    "docker:up": "docker compose -f docker-compose.dev.yml up -d postgres redis",
+    "docker:up:all": "docker compose -f docker-compose.dev.yml up -d",
+    "docker:down": "docker compose -f docker-compose.dev.yml down",
+    "docker:reset": "docker compose -f docker-compose.dev.yml down -v",
+    "docker:logs": "docker compose -f docker-compose.dev.yml logs -f",
+    "docker:ps": "docker compose -f docker-compose.dev.yml ps"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "prettier": "^3.4.2"
+  }
+}

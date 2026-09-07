@@ -1,0 +1,108 @@
+# Production stack — `05-infrastructure.md` §2, §10.2, §12.2;
+# `IMPLEMENTATION_PLAN.md` §22.8.
+#
+#   docker compose -f docker-compose.prod.yml pull
+#   docker compose -f docker-compose.prod.yml run --rm api npm run db:migrate --workspace apps/api
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Migrations run as their OWN step, before the new containers serve traffic
+# (§11.2) — never from app boot.
+#
+# Every value below comes from the environment; there are no development
+# defaults here on purpose. A missing secret must stop the deploy, not silently
+# start the stack with a guessable password.
+
+name: asset-management
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Read-only mount for pg_dump output, written by the host cron job (§4).
+      - ${BACKUP_DIR:-/var/backups/asset-management}:/backups
+    # NO `ports:` — §12.2 requires Postgres to be reachable only on the internal
+    # Docker network. Publishing it to the host is what turns a weak password
+    # into an incident.
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Persistence matters here: Redis holds refresh-token sessions (§6.2), so
+    # losing it signs every user out.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    image: ${API_IMAGE:?required}
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?required}
+      REDIS_URL: ${REDIS_URL:?required}
+      # Names match `apps/api/src/config/index.js` exactly — the config is
+      # fail-fast, so a misnamed variable stops the container at boot rather
+      # than starting it with a default.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?required}
+      CORS_ORIGIN: ${CORS_ORIGIN:?required}
+      STORAGE_PATH: /storage
+      # No schema default (`config/index.js`), so it must be supplied or the
+      # container refuses to boot. 10 MB matches `05-infrastructure.md` §5.3 and
+      # the `client_max_body_size` in `deploy/nginx/app.conf`.
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
+    volumes:
+      # A HOST BIND MOUNT, not a container path: §5.2 is explicit that every
+      # attachment lives here and that a redeploy must not touch it.
+      - ${STORAGE_DIR:?required}:/storage
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    image: ${WEB_IMAGE:?required}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api/v1}
+    restart: unless-stopped
+    # Published to LOOPBACK only. The host-level Nginx (deploy/nginx/site.conf)
+    # terminates TLS and is the single public entry point (§12.1, §12.2).
+    ports:
+      - '127.0.0.1:${WEB_PORT:-8080}:80'
+    networks: [internal]
+    depends_on:
+      - api
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:

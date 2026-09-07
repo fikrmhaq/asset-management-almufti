@@ -1,0 +1,500 @@
+/*
+ * Design tokens and base styles — `07-ui.md` §1.2, `IMPLEMENTATION_PLAN.md` §15.
+ *
+ * Tailwind CSS v4: configuration is CSS-first, so there is no tailwind.config.js.
+ * The `@theme` block below is what makes `bg-background`, `text-muted-foreground`
+ * and friends exist as utilities.
+ *
+ * TWO LAYERS, DELIBERATELY.
+ *
+ *   1. PALETTE — `--color-brand-*`, `--color-neutral-*`, `--color-{success,
+ *      warning,danger}-*`. Raw ramps. A screen never names these.
+ *   2. ROLES — `--color-primary`, `--color-muted-foreground`, `--color-border`…
+ *      Every component refers only to these, so re-theming is a change to this
+ *      file and nowhere else.
+ *
+ * The roles existed before the AL-MUFTI pass and their NAMES have not changed;
+ * only the values they point at. That is why a brand change did not touch forty
+ * screens.
+ *
+ * BRAND. `--color-brand-500` (#008FD7) is sampled from the supplied AL-MUFTI
+ * logo (`public/brand/almufti-logo.png`) and is the identity colour: the active
+ * navigation marker, the focus ring, the logo's own surroundings.
+ *
+ * It is NOT the interactive fill. #008FD7 carries white text at only 3.56:1,
+ * which fails WCAG AA for body-sized text, so every filled control uses
+ * `--color-brand-600` (#0072AE, 5.22:1 with white) and hovers to `-700`
+ * (7.21:1). The identity is preserved; the contrast is not traded away for it.
+ *
+ * Neutrals carry the interface — surfaces, tables, forms and text are grey, not
+ * blue. Blue marks state and identity only.
+ */
+
+@import 'tailwindcss';
+
+/*
+ * Dark is CLASS-DRIVEN, not media-driven: the user has three choices (light,
+ * dark, follow the system) and only a class can express the first two against a
+ * system that says otherwise. `ThemeProvider` owns the class; the inline script
+ * in `index.html` sets it before first paint so there is no flash. The dark
+ * palette is the one the manual already ships (`apps/manual/src/index.css`).
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* ---------------------------------------------------------------------
+     Palette — brand
+     `-500` is the logo blue exactly. Everything else is a ramp built around
+     it, cool-shifted as it darkens so the deep steps stay institutional
+     rather than turning navy.
+     --------------------------------------------------------------------- */
+  --color-brand-25: #f4fafe;
+  --color-brand-50: #e8f5fd;
+  --color-brand-100: #cfeafa;
+  --color-brand-200: #a3d7f4;
+  --color-brand-300: #6dc0eb;
+  --color-brand-400: #2aa5e0;
+  --color-brand-500: #008fd7; /* AL-MUFTI blue — identity, 3.56:1 on white */
+  --color-brand-600: #0072ae; /* interactive fill — 5.22:1 with white */
+  --color-brand-700: #005c8d; /* hover / link text — 7.21:1 on white */
+  --color-brand-800: #084b71;
+  --color-brand-900: #0c3f5e;
+  --color-brand-950: #07293d;
+
+  /* ---------------------------------------------------------------------
+     Palette — neutral
+     The logo's grey (#8B8B8C) is achromatic. This ramp keeps the faintest
+     cool cast so it sits beside the brand blue without reading as a second
+     colour, and is what almost every surface and every line is drawn from.
+     --------------------------------------------------------------------- */
+  --color-neutral-25: #fcfcfd;
+  --color-neutral-50: #f7f8f9;
+  --color-neutral-100: #eff1f3;
+  --color-neutral-200: #e2e5e9;
+  --color-neutral-300: #cdd1d7;
+  --color-neutral-400: #9aa0a8;
+  --color-neutral-500: #6b7075; /* muted text — 5.00:1 on white */
+  --color-neutral-600: #53585e;
+  --color-neutral-700: #3d4147;
+  --color-neutral-800: #292c31;
+  --color-neutral-900: #191b1e; /* body text — 17.4:1 on white */
+  --color-neutral-950: #0e1012;
+
+  /* ---------------------------------------------------------------------
+     Palette — semantic
+     Kept genuinely distinguishable from the brand blue and from each other,
+     because these carry meaning on a status badge, not decoration. Each
+     `-600` step is the one that must survive white text or sit on its own
+     `-50` tint; both were checked, not assumed.
+     --------------------------------------------------------------------- */
+  --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-200: #a6f4c5;
+  --color-success-500: #12b76a;
+  --color-success-600: #047a4e; /* 5.38:1 with white */
+  --color-success-700: #03603d;
+
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-500: #f79009;
+  --color-warning-600: #b54708; /* 5.43:1 with white */
+  --color-warning-700: #7a2e0e; /* dark enough to sit on a warning tint */
+
+  --color-danger-50: #fef3f2;
+  --color-danger-100: #fee4e2;
+  --color-danger-200: #fecdca;
+  --color-danger-500: #ef4b3c;
+  --color-danger-600: #c42a1d; /* 5.68:1 with white */
+  --color-danger-700: #9a2016;
+
+  /* ---------------------------------------------------------------------
+     Roles — surfaces and text
+     --------------------------------------------------------------------- */
+  --color-background: #ffffff;
+  --color-foreground: var(--color-neutral-900);
+
+  /* The application ground behind cards. A faint grey lets a white card read
+     as a raised surface without a heavy shadow — the structure comes from
+     the surface change, which is the restrained reading of Modernist the
+     design brief asks for. */
+  --color-canvas: var(--color-neutral-50);
+
+  --color-card: #ffffff;
+  --color-card-foreground: var(--color-neutral-900);
+
+  --color-popover: #ffffff;
+  --color-popover-foreground: var(--color-neutral-900);
+
+  --color-primary: var(--color-brand-600);
+  --color-primary-foreground: #ffffff;
+  --color-primary-hover: var(--color-brand-700);
+
+  /* The logo blue itself, for the places that should read as identity rather
+     than as a control: the active-nav marker, a selected row's edge. */
+  --color-brand: var(--color-brand-500);
+
+  --color-secondary: var(--color-neutral-100);
+  --color-secondary-foreground: var(--color-neutral-800);
+
+  --color-muted: var(--color-neutral-100);
+  --color-muted-foreground: var(--color-neutral-500);
+
+  --color-accent: var(--color-neutral-100);
+  --color-accent-foreground: var(--color-neutral-900);
+
+  /* Destructive is reserved for actions with no undo — `07-ui.md` §4.4. */
+  --color-destructive: var(--color-danger-600);
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: var(--color-success-600);
+  --color-success-foreground: #ffffff;
+
+  /* `warning-foreground` is used as TEXT ON A WARNING TINT (see
+     `components/ui/badge.jsx`), not as text on a solid fill, so it is the
+     dark end of the ramp. 7.0:1 on `bg-warning/20`. */
+  --color-warning: var(--color-warning-600);
+  --color-warning-foreground: var(--color-warning-700);
+
+  --color-border: var(--color-neutral-200);
+  --color-border-strong: var(--color-neutral-300);
+  --color-input: var(--color-neutral-300);
+
+  /* The focus ring is the LOGO blue, not the button blue: it has to be seen
+     against white, against a grey field and against a filled control, and
+     the brighter step carries further. 3.56:1 on white clears the 3:1 a
+     non-text indicator needs. */
+  --color-ring: var(--color-brand-500);
+
+  /* ---------------------------------------------------------------------
+     Typography
+     A neo-grotesque system stack — geometric enough to sit under the logo's
+     wordmark, and resolved locally so an institutional deployment never
+     waits on a font CDN. Tabular figures are applied per-element in the base
+     layer below rather than as a separate family token.
+     --------------------------------------------------------------------- */
+  --font-sans:
+    'Inter var', Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+
+  /* ---------------------------------------------------------------------
+     Elevation
+     Shallow and tinted with the neutral, not black. Cards get `xs`, popovers
+     and dropdowns `md`, dialogs `lg`. Nothing in this application needs more.
+     --------------------------------------------------------------------- */
+  --shadow-2xs: 0 1px 1px 0 rgb(25 27 30 / 0.04);
+  --shadow-xs: 0 1px 2px 0 rgb(25 27 30 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(25 27 30 / 0.08), 0 1px 2px -1px rgb(25 27 30 / 0.06);
+  --shadow-md: 0 4px 8px -2px rgb(25 27 30 / 0.08), 0 2px 4px -2px rgb(25 27 30 / 0.05);
+  --shadow-lg: 0 12px 16px -4px rgb(25 27 30 / 0.08), 0 4px 6px -2px rgb(25 27 30 / 0.04);
+  --shadow-xl: 0 20px 24px -4px rgb(25 27 30 / 0.1), 0 8px 8px -4px rgb(25 27 30 / 0.04);
+
+  /* ---------------------------------------------------------------------
+     Radii — geometric, not soft. A 16px card corner reads as consumer
+     software; these keep the structured character the brief asks for.
+     --------------------------------------------------------------------- */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.625rem;
+
+  /* ---------------------------------------------------------------------
+     Density — shell metrics, named once so the sidebar, the backdrop and the
+     content offset cannot drift apart.
+     --------------------------------------------------------------------- */
+  --spacing-sidebar: 16rem;
+  --spacing-sidebar-collapsed: 4.5rem;
+  --spacing-topbar: 3.5rem;
+}
+
+/*
+ * Roles — dark.
+ *
+ * Not an inversion. The ground is a warm-free near-black and surfaces step UP
+ * from it, so the interface reads as layered rather than as a light one with
+ * the lights off. The brand blue moves BRIGHTER (`-400`) because the `-600`
+ * fill that carries white text on white loses contrast on near-black — so a
+ * filled control becomes a bright fill with DARK text, the same move the manual
+ * makes.
+ *
+ * Two groups are redefined here:
+ *   1. ROLES — set with explicit values so they never resolve through a palette
+ *      step this same block also redefines.
+ *   2. PALETTE STEPS that components name directly (badges, alerts, the shell).
+ *      Ideally a screen would only ever name a role; where it names a step, the
+ *      step is remapped so the utility comes out right in dark without touching
+ *      forty screens. Overlay steps (`neutral-900/xx`) are deliberately left as
+ *      the light values so a dialog scrim stays dark on both themes.
+ */
+.dark {
+  /* Roles — surfaces and text */
+  --color-background: #0e1012;
+  --color-foreground: #eff1f3;
+  --color-canvas: #0a0b0d;
+
+  --color-card: #191b1e;
+  --color-card-foreground: #eff1f3;
+
+  --color-popover: #191b1e;
+  --color-popover-foreground: #eff1f3;
+
+  --color-primary: #2aa5e0; /* brand-400 — bright fill on near-black */
+  --color-primary-foreground: #0e1012; /* dark text on the bright fill */
+  --color-primary-hover: #6dc0eb; /* brand-300 */
+  --color-brand: #2aa5e0;
+
+  --color-secondary: #292c31;
+  --color-secondary-foreground: #eff1f3;
+
+  --color-muted: #292c31;
+  --color-muted-foreground: #9aa0a8;
+
+  --color-accent: #292c31;
+  --color-accent-foreground: #f7f8f9;
+
+  --color-destructive: #c42a1d; /* darker red keeps white text legible */
+  --color-destructive-foreground: #ffffff;
+
+  --color-success: #047a4e;
+  --color-success-foreground: #ffffff;
+
+  --color-warning: #b54708;
+  --color-warning-foreground: #fedf89; /* text on a warning tint → light */
+
+  --color-border: #24272b;
+  --color-border-strong: #3d4147;
+  --color-input: #3d4147;
+
+  --color-ring: #2aa5e0;
+
+  /* Palette steps named directly by components, remapped for dark.
+     Neutral surfaces step up from the ground; neutral "text" steps go light;
+     neutral-900/950 stay dark for the dialog scrims that use them. */
+  --color-neutral-25: #141619;
+  --color-neutral-50: #17191c;
+  --color-neutral-100: #1e2126;
+  --color-neutral-200: #262a2f;
+  --color-neutral-300: #3d4147; /* faint icons/disabled + pressed fills */
+  --color-neutral-600: #cdd1d7; /* was dark text → now light */
+  --color-neutral-700: #e2e5e9;
+
+  /* Brand: identity steps stay; the deep "text" steps go light so brand text
+     is legible on near-black; the pale tint becomes a dark wash. */
+  --color-brand-50: #10242f;
+  --color-brand-200: #0c3f5e;
+  --color-brand-600: #6dc0eb;
+  --color-brand-700: #6dc0eb;
+  --color-brand-900: #a3d7f4;
+
+  /* Semantic ramps used by badges/alerts: `-50` tint → dark wash, `-200`
+     border → darker, `-600/700` text → light. */
+  --color-success-50: #10261c;
+  --color-success-200: #1f6b47;
+  --color-success-600: #6ee7a8;
+  --color-success-700: #7ee2ad;
+
+  --color-warning-50: #291f12;
+  --color-warning-200: #6e521c;
+  --color-warning-600: #f4b451;
+
+  --color-danger-50: #2a1618;
+  --color-danger-100: #351a1c;
+  --color-danger-200: #6e2b28;
+  --color-danger-600: #f4a89f;
+  --color-danger-700: #f4a89f;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-canvas);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Headings are tight and modest. The brief rules out oversized marketing
+     typography explicitly; a page title here is a label, not a banner. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.011em;
+    text-wrap: balance;
+  }
+
+  /* Figures in tables must line up column-to-column, which proportional
+     numerals do not do. Applied to the elements that hold data rather than
+     globally, so prose keeps its natural figures. */
+  table,
+  time,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* A visible focus ring on every interactive element is the accessibility
+     baseline `07-ui.md` §8 assumes; Radix handles the rest. The offset is
+     what keeps it legible on a filled control, where a flush outline would
+     disappear into the fill. */
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  /*
+   * Native checkboxes and radios, tinted to the brand.
+   *
+   * Several forms register a plain `<input type="checkbox">` directly with
+   * React Hook Form. Those inputs are correct and accessible as they are, and
+   * rewriting eight screens to swap in a component would be a module change
+   * dressed up as a design change — so they simply inherit the brand accent
+   * here instead, and keep the platform's own checked/indeterminate rendering.
+   *
+   * `components/ui/checkbox.jsx` is the fuller treatment for new markup; this
+   * makes sure the two never look like different systems in the meantime.
+   */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-primary);
+  }
+
+  ::selection {
+    background-color: var(--color-brand-100);
+    color: var(--color-brand-900);
+  }
+
+  /* On dark, both brand-100 and brand-900 resolve light, so the pair is set
+     explicitly here rather than inherited from the remapped ramp. */
+  .dark ::selection {
+    background-color: #0c3f5e;
+    color: #e8f5fd;
+  }
+}
+
+/*
+ * The glyphs for `components/ui/checkbox.jsx`.
+ *
+ * Both are backgrounds on the input itself rather than extra elements, so the
+ * control stays a single native `<input>` that React Hook Form can register and
+ * that the platform still owns the semantics of. They live here rather than in
+ * an arbitrary Tailwind value because a data URI full of commas and quotes is
+ * unreadable inline — and impossible to review.
+ *
+ * A tick and a dot on the same filled brand square/circle: the two controls read
+ * as one family, and the shape (square vs round) is what says which is which.
+ */
+@utility checkbox-mark {
+  &:checked {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 10 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 4L3.5 6.5L9 1' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-size: 0.625rem 0.5rem;
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+}
+
+@utility radio-mark {
+  &:checked {
+    background-image: radial-gradient(circle, #fff 0 33%, transparent 35%);
+  }
+}
+
+/*
+ * A scrollbar that does not shout. Used on the sidebar and on any panel that
+ * scrolls inside the page, where the platform default is a heavy vertical rule
+ * against a light surface.
+ */
+@utility scrollbar-subtle {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-neutral-300) transparent;
+
+  &::-webkit-scrollbar {
+    width: 0.375rem;
+    height: 0.375rem;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: var(--color-neutral-300);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-neutral-400);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Print — asset unit labels (Phase 18, `CR-001`, REQ-UNIT-010)
+   ---------------------------------------------------------------------------
+   The label pages are routes rather than dialogs precisely so this can exist: a
+   dialog cannot be isolated for printing, but a route can hide the application
+   shell and leave nothing but labels on the paper.
+
+   Everything here is scoped to `@media print`, so it has no effect on screen.
+*/
+@media print {
+  /* The shell is navigation. On paper it is wasted toner and a header repeated
+     on every sheet. */
+  [data-print-hide],
+  .no-print,
+  nav[aria-label='Main navigation'],
+  nav[aria-label='Breadcrumb'],
+  header[data-shell],
+  aside {
+    display: none !important;
+  }
+
+  /* Print backgrounds and borders as authored. Without this most browsers strip
+     them to save ink, and a label with no border is not a label — it is text
+     floating on a page with nothing to cut along. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html,
+  body {
+    background: #fff;
+    margin: 0;
+    padding: 0;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  @page {
+    margin: 10mm;
+  }
+
+  .print-sheet {
+    display: block;
+  }
+
+  /* Two columns of labels down the page. Fixed rather than responsive: paper
+     does not have a viewport, and a label's physical size is the point. */
+  .unit-label-sheet {
+    display: grid !important;
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 4mm !important;
+  }
+
+  /* Half a QR code is not a QR code. */
+  .unit-label {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    border: 1px solid #999 !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+}

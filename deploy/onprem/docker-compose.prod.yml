@@ -1,0 +1,128 @@
+# On-premises stack — a single Linux server on the institution's own network,
+# no public domain, no internet required at run time.
+#
+# Derived from the repository-root `docker-compose.prod.yml`; the differences are
+# deliberate and listed here:
+#
+#   1. NO `build:` sections. The server has no source tree — images arrive as
+#      tarballs from `scripts/build-images.sh` and are loaded with
+#      `scripts/load-images.sh`. `docker compose pull` must NOT be run.
+#   2. `STORAGE_PATH` is `/storage/attachments`, matching `05-infrastructure.md`
+#      §5.2 and the Render deployment. The root file says `/storage`, which
+#      writes attachments one level higher than the specification describes.
+#      Storage references are stored RELATIVE to the root, so this choice is
+#      internal to a deployment and does not affect existing rows.
+#   3. `BUSINESS_TIMEZONE`, `JOBS_ENABLED` and the two JWT expiries are plumbed
+#      through. §9.1 lists `BUSINESS_TIMEZONE` as a required variable; the root
+#      file omits it, so it can only be changed by editing the compose file.
+#
+# Usage — see README.md for the full runbook:
+#
+#   docker compose -f docker-compose.prod.yml run --rm api npm run db:migrate --workspace apps/api
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Migrations run as their OWN step, before the new containers serve traffic
+# (§11.2) — never from app boot.
+
+name: asset-management
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # For manual dumps taken from inside the container. The nightly backup
+      # streams through stdout and does not depend on this mount.
+      - ${BACKUP_DIR:-/var/backups/asset-management}:/backups
+    # NO `ports:` — §12.2 requires Postgres to be reachable only on the internal
+    # Docker network. Publishing it to the LAN is what turns a weak password
+    # into an incident. Use `docker compose exec postgres psql` instead.
+    networks: [internal]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Persistence matters here: Redis holds refresh-token sessions (§6.2), so
+    # losing it signs every user out.
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    # Defaults match the tags `scripts/build-images.sh` produces, so a standard
+    # build needs no entry in `.env` at all.
+    image: ${API_IMAGE:-asset-management/api:1.0.0}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?required}
+      REDIS_URL: ${REDIS_URL:?required}
+      # Names match `apps/api/src/config/index.js` exactly — the config is
+      # fail-fast, so a misnamed variable stops the container at boot rather
+      # than starting it with a default.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?required}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+      # The exact origin the browser uses, e.g. https://assets.example.local.
+      # Never `*` (§12.3); a trailing slash makes it not match.
+      CORS_ORIGIN: ${CORS_ORIGIN:?required}
+      # The bind mount below is at /storage; this is the attachment root inside
+      # it (§5.2). The app creates the per-asset shard directories itself.
+      STORAGE_PATH: /storage/attachments
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-10}
+      # The zone the institution's calendar month is expressed in (CR-012,
+      # REQ-COND-006). UTC months would begin at 07:00 local in Jakarta.
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-Asia/Jakarta}
+      # The overdue sweep (REQ-BORROW-012) runs in this process. Leave on.
+      JOBS_ENABLED: ${JOBS_ENABLED:-true}
+    volumes:
+      # A HOST BIND MOUNT, not a container path: §5.2 is explicit that every
+      # attachment lives here and that a redeploy must not touch it.
+      #
+      # The mount HIDES the ownership the image sets, so the host directory must
+      # be owned by uid 1000 (the `node` user) or every upload fails with EACCES:
+      #   sudo chown -R 1000:1000 /srv/asset-management/storage
+      - ${STORAGE_DIR:?required}:/storage
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  web:
+    image: ${WEB_IMAGE:-asset-management/web:1.0.0}
+    restart: unless-stopped
+    # Published to LOOPBACK only. The TLS front — host Nginx (nginx/site.conf)
+    # or the optional `tls` container (docker-compose.tls.yml) — is the single
+    # entry point reachable from the LAN (§12.1, §12.2).
+    ports:
+      - '127.0.0.1:${WEB_PORT:-8080}:80'
+    networks: [internal]
+    depends_on:
+      - api
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:

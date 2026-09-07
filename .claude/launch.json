@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "manual",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "apps/manual"],
+      "port": 5175
+    },
+    {
+      "//": "Web only. The combined `npm run dev` cannot be used here: the preview harness sets PORT, which apps/api reads, so the API would try to bind the Vite port. Start the API separately with its own PORT (3000).",
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 5173
+    }
+  ]
+}

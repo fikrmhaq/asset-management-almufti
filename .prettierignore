@@ -1,0 +1,15 @@
+node_modules/
+dist/
+build/
+coverage/
+storage/
+*.csv
+*.sql
+*.svg
+package-lock.json
+
+# Specification documents are the source of truth and are maintained by hand.
+# Reformatting them would create churn in the one place churn is least welcome.
+docs/
+CLAUDE.md
+IMPLEMENTATION_PLAN.md
