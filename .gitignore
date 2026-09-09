@@ -50,5 +50,7 @@ template/
 
 # Local scratch workspace — not part of the deliverable.
 apps/learning/
+apps/manual
+IMPLEMENTATION_PLAN.md
 
 asset_app.sql
