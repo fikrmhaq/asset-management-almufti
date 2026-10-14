@@ -270,8 +270,10 @@ const TOKENS = Object.freeze([
      * given to it is taken from the label's budget in that same format.
      */
     id: COMPOSITION_TOKEN,
-    name: 'Number composition',
-    description: 'A number entered by the person registering the unit, such as 001-02-03',
+    // P4 (§64.4): what registrars call it — the Unit number, typed per unit.
+    name: 'Unit number',
+    description:
+      'The number the person registering types for each unit, such as 1.6 or 001-02-03',
     source: 'supplied at registration',
     field: 'numberComposition',
     kind: 'supplied',
@@ -603,24 +605,58 @@ function validateFormat(format) {
  *   carried in a URL path segment
  */
 function buildPrefix(format, context) {
+  const { parts, problems } = renderParts(format, context);
+
+  if (problems.length > 0) {
+    throw new ValidationError('The inventory code cannot be generated for this unit', problems);
+  }
+
+  return parts
+    .filter((part) => part.tokenId !== SEQUENCE_TOKEN)
+    .map((part) => part.text)
+    .join('');
+}
+
+/**
+ * The code, part by part — THE ONE RENDERER (P4, `IMPLEMENTATION_PLAN.md` §64.4).
+ *
+ * `buildPrefix` (every registration) and the inventory-code preview both walk
+ * the format through here, so what a registrar is shown and what is issued can
+ * never diverge. Each part is a literal, or a token with its value — or, when
+ * the value is missing or unusable, `text: null` and the problem that
+ * `buildPrefix` refuses the registration with. The sequence, always last, is a
+ * part with `text: null` and `allocated: true`: only allocation decides it.
+ *
+ * @returns {{parts: Array<{kind: 'LITERAL'|'TOKEN', tokenId?: string, text: string|null,
+ *   allocated?: boolean, problem?: {field: string, issue: string}}>,
+ *   problems: Array<{field: string, issue: string}>}}
+ */
+function renderParts(format, context) {
   const segments = validateFormat(format);
   const problems = [];
-  let prefix = '';
+  const parts = [];
+  const refuse = (token, problem) => {
+    problems.push(problem);
+    parts.push({ kind: 'TOKEN', tokenId: token.id, text: null, problem });
+  };
 
   for (const segment of segments) {
     if (segment.type === 'literal') {
-      prefix += segment.value;
+      parts.push({ kind: 'LITERAL', text: segment.value });
       continue;
     }
 
     // Always the last segment — `validateFormat` guarantees it.
-    if (segment.value === SEQUENCE_TOKEN) break;
+    if (segment.value === SEQUENCE_TOKEN) {
+      parts.push({ kind: 'TOKEN', tokenId: SEQUENCE_TOKEN, text: null, allocated: true });
+      break;
+    }
 
     const token = TOKENS_BY_ID.get(segment.value);
     const raw = token.resolve(context);
 
     if (raw === null || raw === undefined || raw === '') {
-      problems.push({
+      refuse(token, {
         field: token.field ?? 'format',
         issue:
           `this institution's inventory code format requires ${token.name.toLowerCase()}, ` +
@@ -643,7 +679,7 @@ function buildPrefix(format, context) {
       const normalized = normalize(value);
 
       if (normalized.value === null) {
-        problems.push({
+        refuse(token, {
           field: token.field ?? 'format',
           issue:
             normalized.reason === 'empty'
@@ -657,7 +693,7 @@ function buildPrefix(format, context) {
 
       value = normalized.value;
     } else if (!isSafe(value)) {
-      problems.push({
+      refuse(token, {
         field: token.field ?? 'format',
         issue:
           `"${value}" contains characters that are unsafe in a web address, and it would be ` +
@@ -676,7 +712,7 @@ function buildPrefix(format, context) {
     const budget = budgetForToken(segments, token.id);
 
     if (value.length > budget) {
-      problems.push({
+      refuse(token, {
         field: token.field ?? 'format',
         issue:
           `"${value}" is ${value.length} characters and this format leaves ${budget} for ` +
@@ -686,14 +722,10 @@ function buildPrefix(format, context) {
       continue;
     }
 
-    prefix += value;
+    parts.push({ kind: 'TOKEN', tokenId: token.id, text: value });
   }
 
-  if (problems.length > 0) {
-    throw new ValidationError('The inventory code cannot be generated for this unit', problems);
-  }
-
-  return prefix;
+  return { parts, problems };
 }
 
 /**
@@ -858,10 +890,23 @@ const tokensIn = (format) =>
 function registrationHint(institution) {
   // No institution means no format to apply, so the unit registers with no code
   // at all and there is nothing to ask for (REQ-UNIT-007).
-  if (!institution) return { numberComposition: { required: false } };
+  if (!institution) {
+    return { numberComposition: { required: false }, fundingSource: { inCode: false } };
+  }
 
   const format = formatFor(institution);
-  if (!formatUsesComposition(format)) return { numberComposition: { required: false } };
+  /**
+   * Whether the code carries the funding source — REQ-UNIT-012, migration 056.
+   * Only that the token is present, like `numberComposition` below: never the
+   * format itself. Whether a value must then be SUPPLIED depends on the asset's
+   * Contract, which the server decides at registration; the screen uses this
+   * only to offer the field where it can matter.
+   */
+  const fundingSource = { inCode: tokensIn(format).has('FUNDING_SOURCE_CODE') };
+
+  if (!formatUsesComposition(format)) {
+    return { numberComposition: { required: false }, fundingSource };
+  }
 
   return {
     numberComposition: {
@@ -871,6 +916,7 @@ function registrationHint(institution) {
       perUnit: !formatHasSequence(format),
       maxLength: budgetForToken(parseFormat(format), COMPOSITION_TOKEN),
     },
+    fundingSource,
   };
 }
 
@@ -894,6 +940,7 @@ module.exports = {
   tokensIn,
   registrationHint,
   buildPrefix,
+  renderParts,
   catalog,
   renderPreview,
 };

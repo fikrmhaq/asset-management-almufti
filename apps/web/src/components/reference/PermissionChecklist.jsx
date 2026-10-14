@@ -48,6 +48,8 @@ const GROUP_ORDER = [
   'Asset Core',
   'Procurement',
   'Operations',
+  // `CR-014`, Phase 37.
+  'Requests',
   'Reports',
   'Audit',
 ];

@@ -127,7 +127,9 @@ describe('foreign keys', () => {
     expect(actual).toEqual(expected);
   });
 
-  it('cascades from exactly the 12 documented parents', async () => {
+  // 13 since Phase 36 (`CR-014`): `fk_wf_step_definition`, documented in
+  // `04-data-model.md` §5.7.2. No endpoint deletes a definition.
+  it('cascades from exactly the 13 documented parents', async () => {
     const rows = await constraintsOfType('f');
     const cascading = rows.filter((r) => r.on_delete === 'c').map((r) => r.name);
 
@@ -145,6 +147,7 @@ describe('foreign keys', () => {
         'fk_transaction_items_transaction',
         'fk_user_roles_role',
         'fk_user_roles_user',
+        'fk_wf_step_definition',
       ].sort()
     );
   });

@@ -69,6 +69,18 @@ const RESOURCES = [
     description: "An institution's inventory code format",
   },
   {
+    /**
+     * An institution's Teacher Storage Room — REQ-REQUEST-023, migration 063.
+     * Not system-wide-only, for the same reason as `inventory-code-format`:
+     * naming THIS institution's room is meaningful scoped to one, and an
+     * institution administrator must not need `institution:update` for it.
+     */
+    resource: 'teacher-storage-room',
+    actions: ['read', 'update'],
+    group: 'Organization',
+    description: "An institution's Teacher Storage Room",
+  },
+  {
     resource: 'department',
     actions: [...CRUD, ...SOFT_DELETE],
     group: 'Organization',
@@ -111,6 +123,122 @@ const RESOURCES = [
     actions: ['read', 'create', 'delete'],
     group: 'Organization',
     description: 'Person in charge of a department',
+  },
+  {
+    // The fixed list of school positions — Phase 35 (`CR-014`), `06-api.md`
+    // §12.1. Read-only, like `condition:read`: the list is defined by the
+    // application, never by an administrator.
+    resource: 'school-position',
+    actions: ['read'],
+    group: 'Organization',
+    description: 'School positions',
+  },
+  {
+    // Who holds which school position — Phase 35 (`CR-014`). `end` closes an
+    // assignment; nothing is ever deleted. Grants no record access (`BR-028`),
+    // and deliberately absent from `PIC_ALLOWED_PERMISSIONS`.
+    resource: 'position-assignment',
+    actions: ['read', 'create', 'end'],
+    group: 'Organization',
+    description: 'School position assignments',
+  },
+  {
+    // Versioned request workflows — Phase 36 (`CR-014` §6.3), `06-api.md`
+    // §12.2. `create` covers a new draft, a draft from a template and a new
+    // version; `update` edits a DRAFT's steps; `publish` activates a draft and
+    // retires the previous version. Institution-scoped, not system-wide-only:
+    // each school configures its own process. Deliberately absent from
+    // `PIC_ALLOWED_PERMISSIONS` (`CR-014` `DEC-P`).
+    resource: 'workflow-definition',
+    actions: ['read', 'create', 'update', 'publish'],
+    group: 'Organization',
+    description: 'Request workflow definitions',
+  },
+
+  // --- Requests (06-api.md §12.3) — `CR-014` --------------------------------
+  {
+    /**
+     * Phase 37: drafting. Later phases add their own actions here (`submit`,
+     * `cancel`, `close`, `receive`) — only the codes a built endpoint guards
+     * exist (Phase 37 decision E2).
+     *
+     * `oversee` is the one code with no endpoint (`CR-014` `DEC-T`, §10.2): it
+     * widens row visibility to the institution's SUBMITTED-and-later requests.
+     * It never exposes another user's DRAFT (decision E1) and never makes
+     * anyone a workflow actor.
+     *
+     * None of these is in `PIC_ALLOWED_PERMISSIONS` (`CR-014` `DEC-P`).
+     */
+    resource: 'request',
+    // Phase 38 adds `submit` and `cancel` (which also discards an own DRAFT).
+    // Phase 41 adds `receive` (the requester only — never oversight) and
+    // `close` (close the remainder; visibility, no actor rule).
+    actions: ['read', 'create', 'update', 'oversee', 'submit', 'cancel', 'receive', 'close'],
+    group: 'Requests',
+    description: 'Requests',
+  },
+  {
+    /**
+     * A request's workflow steps — Phase 38. There is no `read`: the request
+     * detail carries its steps under `request:read` (`CR-014` §10.1).
+     *
+     * Both codes require BEING the step's resolved actor as well (`DEC-J`):
+     * the permission says "may do this kind of thing", the position says "this
+     * step is yours". Neither implies the other, and `request:oversee` never
+     * substitutes for the second.
+     */
+    resource: 'request-step',
+    actions: ['decide', 'complete'],
+    group: 'Requests',
+    description: 'Request workflow steps',
+  },
+  {
+    // Lines of a DRAFT request — Phase 37. `register` (Phase 40): register new
+    // units against an item; also needs being the REGISTER step's current actor
+    // and the existing `asset-unit:create` (+ `asset:create` for a new asset).
+    resource: 'request-item',
+    actions: ['create', 'update', 'delete', 'register'],
+    group: 'Requests',
+    description: 'Request items',
+  },
+  {
+    /**
+     * Files attached to a request — Phase 39 (`CR-014` §9, §10.1). Each code is
+     * necessary, never sufficient: `read` needs row visibility; `create` needs
+     * being the requester, the actor of an ACTIVE step, or `request:oversee`;
+     * `delete` needs being the uploader of a DRAFT's document, or
+     * `request:oversee`. Not in `PIC_ALLOWED_PERMISSIONS` (`DEC-P`).
+     */
+    resource: 'request-document',
+    actions: ['read', 'create', 'delete'],
+    group: 'Requests',
+    description: 'Request documents',
+  },
+  {
+    /**
+     * Registration links between a request item and an asset unit — Phase 40
+     * (`CR-014` §7.3, §10.1). `read`: row visibility. `create`: link an
+     * existing unit — also needs being the REGISTER step's current actor, and
+     * `asset-unit:read` to reach the unit. `delete`: unlink while REGISTER is
+     * ACTIVE, as its current actor or with `request:oversee`. Registration is
+     * not receipt (`BR-031`). Not in `PIC_ALLOWED_PERMISSIONS` (`DEC-P`).
+     */
+    resource: 'request-item-unit',
+    actions: ['read', 'create', 'delete'],
+    group: 'Requests',
+    description: 'Registered units of request items',
+  },
+  {
+    /**
+     * Receipts — Phase 41 (`IMPLEMENTATION_PLAN.md` §60.2 Q2c). `reverse` is
+     * required together with `request:oversee`, never by the user who recorded
+     * the receipt, and only while the Request has not ended. Recording a
+     * receipt is `request:receive`. Not in `PIC_ALLOWED_PERMISSIONS`.
+     */
+    resource: 'request-receipt',
+    actions: ['reverse'],
+    group: 'Requests',
+    description: 'Request receipts',
   },
   {
     // GET/PUT /roles/:id/permissions — PUT replaces the whole granted set, so
@@ -199,6 +327,31 @@ const RESOURCES = [
     actions: ['create', 'read', 'update', 'deactivate', 'record-history'],
     group: 'Asset Core',
     description: 'Asset units',
+  },
+  {
+    /**
+     * A Room PIC's report about a unit — REQ-REQUEST-025. `create` lets the
+     * CURRENT Location PIC of a unit's exact room file a report; it is no read
+     * grant (the reporter sees only their rooms' units, through the reports
+     * API). `review` confirms or rejects. Outside the PIC ceiling; not
+     * system-wide-only.
+     */
+    resource: 'asset-unit-report',
+    actions: ['create', 'review'],
+    group: 'Asset Core',
+    description: 'Unit reports',
+  },
+  {
+    /**
+     * Consumables — quantity-based stock, not Assets (§73, migration 067).
+     * `manage-stock` receives and adjusts stock and issues it against an
+     * approved request line. Institution-scoped; outside the PIC ceiling; not
+     * system-wide-only.
+     */
+    resource: 'consumable',
+    actions: [...CRUD, ...SOFT_DELETE, 'manage-stock'],
+    group: 'Operations',
+    description: 'Consumables',
   },
   {
     resource: 'asset-attribute-value',
@@ -431,6 +584,14 @@ const ACTION_PHRASE = {
   return: 'Record the return of',
   extend: 'Extend',
   'record-history': 'Record a history entry for',
+  end: 'End',
+  publish: 'Publish',
+  oversee: 'Oversee',
+  submit: 'Submit',
+  decide: 'Approve or reject',
+  complete: 'Declare completed',
+  review: 'Confirm or reject',
+  'manage-stock': 'Receive, adjust and issue stock of',
 };
 
 /** `{resource}:{action}` — the one place the code format is defined. */

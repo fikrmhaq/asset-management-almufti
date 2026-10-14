@@ -13,6 +13,7 @@ const {
   validateFormat,
   worstCaseLength,
   buildPrefix,
+  renderParts,
   catalog,
   renderPreview,
 } = require('../src/domain/inventoryCodeFormat.js');
@@ -165,9 +166,7 @@ describe('the sequence rule (REQ-UNIT-007)', () => {
   });
 
   it('allows a format with no sequence when a composition distinguishes the units', () => {
-    expect(() =>
-      validateFormat('{NUMBER_COMPOSITION}-{REGISTRATION_YEAR}')
-    ).not.toThrow();
+    expect(() => validateFormat('{NUMBER_COMPOSITION}-{REGISTRATION_YEAR}')).not.toThrow();
   });
 
   it('requires at most one sequence', () => {
@@ -175,9 +174,9 @@ describe('the sequence rule (REQ-UNIT-007)', () => {
   });
 
   it('requires at most one composition', () => {
-    expect(
-      issuesFrom(() => validateFormat('{NUMBER_COMPOSITION}-{NUMBER_COMPOSITION}'))
-    ).toMatch(/at most once/);
+    expect(issuesFrom(() => validateFormat('{NUMBER_COMPOSITION}-{NUMBER_COMPOSITION}'))).toMatch(
+      /at most once/
+    );
   });
 
   it('allows both a composition and a sequence together', () => {
@@ -243,8 +242,7 @@ describe('length ceiling (`BR-026`)', () => {
   it('accepts the realistic wide case', () => {
     // Classification, department, year and sequence — the shape the change
     // request was actually asked for.
-    const format =
-      '{CLASSIFICATION_CODE}-{DEPARTMENT_CODE}-{REGISTRATION_YEAR}-{SEQUENCE}';
+    const format = '{CLASSIFICATION_CODE}-{DEPARTMENT_CODE}-{REGISTRATION_YEAR}-{SEQUENCE}';
 
     expect(worstCaseLength(parseFormat(format))).toBeLessThanOrEqual(MAX_LENGTH);
     expect(() => validateFormat(format)).not.toThrow();
@@ -322,7 +320,9 @@ describe('rendering a prefix (REQ-UNIT-007)', () => {
 
     it('refuses an institution code that could not survive it either', () => {
       expect(
-        issuesFrom(() => buildPrefix(DEFAULT_FORMAT, { ...context, institution: { code: 'SMK N/1' } }))
+        issuesFrom(() =>
+          buildPrefix(DEFAULT_FORMAT, { ...context, institution: { code: 'SMK N/1' } })
+        )
       ).toMatch(/unsafe in a web address/);
     });
 
@@ -419,7 +419,7 @@ describe('the token registry (`BR-026`)', () => {
 });
 
 describe('preview (REQ-ORG-007)', () => {
-  it('uses the institution\'s real values rather than invented ones', () => {
+  it("uses the institution's real values rather than invented ones", () => {
     const { preview } = renderPreview(DEFAULT_FORMAT, { institution, department, at });
 
     expect(preview).toBe(`ALM-1-${new Date().getFullYear()}-00001`);
@@ -536,9 +536,7 @@ describe('elastic budgets (`CR-007`, `BR-026`)', () => {
     // Deliberately narrower than "no token may repeat": a format stored under
     // `CR-006` could contain one, and refusing it now would break a
     // configuration that has been generating codes.
-    expect(() =>
-      validateFormat('{INSTITUTION_CODE}-{INSTITUTION_CODE}-{SEQUENCE}')
-    ).not.toThrow();
+    expect(() => validateFormat('{INSTITUTION_CODE}-{INSTITUTION_CODE}-{SEQUENCE}')).not.toThrow();
   });
 });
 
@@ -613,7 +611,9 @@ describe('rendering the new tokens (`CR-007`)', () => {
     // `BR-027`: a person meant what they typed, so an unusable character is an
     // error to report — not something to silently turn into `001_02`.
     expect(
-      issuesFrom(() => buildPrefix(CLIENT_FORMAT, { ...clientContext, numberComposition: '001/02' }))
+      issuesFrom(() =>
+        buildPrefix(CLIENT_FORMAT, { ...clientContext, numberComposition: '001/02' })
+      )
     ).toMatch(/unsafe in a web address/);
   });
 
@@ -635,5 +635,96 @@ describe('rendering the new tokens (`CR-007`)', () => {
     } catch (error) {
       expect(error.details.map((d) => d.field)).toContain(field);
     }
+  });
+});
+
+describe('the registration hint names the funding source (REQ-UNIT-012)', () => {
+  const { registrationHint } = require('../src/domain/inventoryCodeFormat.js');
+  const ALM =
+    '{NUMBER_COMPOSITION}/{CLASSIFICATION_LEAF_LABEL}/{FUNDING_SOURCE_CODE}/{REGISTRATION_YEAR}';
+
+  it('says the code carries the funding source when the format uses it', () => {
+    const hint = registrationHint({ code: 'ALM-1', inventoryCodeFormat: ALM });
+
+    expect(hint.fundingSource).toEqual({ inCode: true });
+    expect(hint.numberComposition.required).toBe(true);
+  });
+
+  it('says it does not for the default format, or with no institution', () => {
+    expect(registrationHint({ code: 'X' }).fundingSource).toEqual({ inCode: false });
+    expect(registrationHint(null)).toEqual({
+      numberComposition: { required: false },
+      fundingSource: { inCode: false },
+    });
+  });
+
+  it('discloses only the flag, never the format', () => {
+    const hint = registrationHint({ code: 'ALM-1', inventoryCodeFormat: ALM });
+
+    expect(Object.keys(hint.fundingSource)).toEqual(['inCode']);
+    expect(JSON.stringify(hint)).not.toContain('FUNDING_SOURCE_CODE');
+  });
+});
+
+/**
+ * The one renderer — P4 (`IMPLEMENTATION_PLAN.md` §64.4). `buildPrefix` and the
+ * inventory-code preview both walk the format through `renderParts`, so the
+ * preview can never show a code that registration would not issue.
+ */
+describe('renderParts (P4)', () => {
+  const format = '{NUMBER_COMPOSITION}/{CLASSIFICATION_CODE}/{DEPARTMENT_CODE}/{REGISTRATION_YEAR}';
+
+  it('returns every part, literal or token, in order', () => {
+    const { parts, problems } = renderParts(format, { ...context, numberComposition: '1.6' });
+    expect(problems).toEqual([]);
+    expect(parts).toEqual([
+      { kind: 'TOKEN', tokenId: 'NUMBER_COMPOSITION', text: '1.6' },
+      { kind: 'LITERAL', text: '/' },
+      { kind: 'TOKEN', tokenId: 'CLASSIFICATION_CODE', text: '202010500200' },
+      { kind: 'LITERAL', text: '/' },
+      { kind: 'TOKEN', tokenId: 'DEPARTMENT_CODE', text: 'TKJ' },
+      { kind: 'LITERAL', text: '/' },
+      { kind: 'TOKEN', tokenId: 'REGISTRATION_YEAR', text: '2026' },
+    ]);
+  });
+
+  it('agrees with buildPrefix — the joined parts are the issued code', () => {
+    for (const value of ['1.9', '1.10', '001-02-03']) {
+      const ctx = { ...context, numberComposition: value };
+      expect(
+        renderParts(format, ctx)
+          .parts.map((part) => part.text)
+          .join('')
+      ).toBe(buildPrefix(format, ctx));
+    }
+  });
+
+  it('marks the sequence as allocated, never rendered', () => {
+    const { parts } = renderParts('{INSTITUTION_CODE}-{SEQUENCE}', context);
+    expect(parts.at(-1)).toEqual({
+      kind: 'TOKEN',
+      tokenId: 'SEQUENCE',
+      text: null,
+      allocated: true,
+    });
+    expect(buildPrefix('{INSTITUTION_CODE}-{SEQUENCE}', context)).toBe('ALM-1-');
+  });
+
+  it('reports a problem on the part itself instead of throwing', () => {
+    const { parts, problems } = renderParts(format, {
+      ...context,
+      department: null,
+      numberComposition: '1/6',
+    });
+    expect(problems.map((problem) => problem.field).sort()).toEqual([
+      'departmentId',
+      'numberComposition',
+    ]);
+    const unit = parts.find((part) => part.tokenId === 'NUMBER_COMPOSITION');
+    expect(unit.text).toBeNull();
+    expect(unit.problem.issue).toMatch(/unsafe/);
+    expect(() =>
+      buildPrefix(format, { ...context, department: null, numberComposition: '1/6' })
+    ).toThrow();
   });
 });

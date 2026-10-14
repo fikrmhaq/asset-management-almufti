@@ -22,7 +22,13 @@ const {
   assertCanAccess,
   assertCanAssignInstitution,
   defaultInstitutionFor,
+  assetScopeFilter,
+  assertCanAccessAsset,
+  assertAssetWideChange,
+  mayChangeWholeAsset,
+  assertCanCreateStandaloneAsset,
 } = require('../../domain/scope');
+const { operatingDepartments } = require('../../domain/operatingScope');
 
 const SORTABLE = ['name', 'createdAt', 'updatedAt'];
 
@@ -107,7 +113,11 @@ async function list(params, principal, { models = getModels() } = {}) {
     defaultSort: [['createdAt', 'DESC']],
   });
 
-  options.where = { ...options.where, ...scopeFilter(principal) };
+  // P3 (§64.3): a department-bound operator reaches only assets with a unit of
+  // their department. Merged as `Op.and`, so no supplied filter displaces it.
+  options.where = {
+    [Op.and]: [options.where, scopeFilter(principal), assetScopeFilter(principal)],
+  };
 
   const { rows, pagination } = await paginate(models.Asset, options);
 
@@ -126,7 +136,9 @@ async function getById(id, principal, { models = getModels(), withRelations = fa
       : undefined,
   });
 
-  return assertCanAccess(principal, asset, { label: 'Asset' });
+  assertCanAccess(principal, asset, { label: 'Asset' });
+  // P3 (§64.3): through its units, for a department-bound operator — `404`.
+  return assertCanAccessAsset(principal, asset, { label: 'Asset' });
 }
 
 /**
@@ -145,8 +157,34 @@ const detail = async (id, principal, options = {}) => {
   return {
     ...serialize(asset),
     unitRegistration: registrationHint(asset.institution ?? null),
+    // P3 (§64.3): whether a change to the WHOLE asset is open to the caller —
+    // the rule `assertAssetWideChange` enforces, so the screen offers edit,
+    // (de)activation, asset attribute values and asset-level files only then.
+    scope: { wholeAssetChange: await mayChangeWholeAsset(principal, asset) },
   };
 };
+
+/**
+ * `GET /assets/scope` — the caller's own Asset reach, for the screens (P3 UI):
+ * whether they are narrowed to departments (a KAJUR / TOOLMAN, REQ-AUTHZ-009),
+ * which, and whether a standalone asset may be created. Read-only; the server
+ * enforces every one of these on its own paths.
+ */
+async function scope(principal, { models = getModels() } = {}) {
+  const narrowed = operatingDepartments(principal);
+  const departments = narrowed
+    ? await models.Department.findAll({
+        where: { id: [...narrowed] },
+        attributes: ['id', 'code', 'name'],
+        order: [['code', 'ASC']],
+      })
+    : [];
+  return {
+    departmentScoped: Boolean(narrowed),
+    departments: departments.map(({ id, code, name }) => ({ id, code, name })),
+    createStandaloneAsset: !narrowed,
+  };
+}
 
 /** Rejects references that do not exist, so the FK never has to. */
 async function assertReferences(body, models) {
@@ -207,6 +245,9 @@ async function assertContractChangeAllowed(asset, body, models) {
 }
 
 async function create(body, principal, { models = getModels() } = {}) {
+  // P3 (§64.3): an asset with no unit is outside a Kajur's or Toolman's reach at
+  // once — they register through a request, or add a unit to one they can see.
+  assertCanCreateStandaloneAsset(principal);
   const institutionId = defaultInstitutionFor(principal, body.institutionId);
   assertCanAssignInstitution(principal, institutionId);
 
@@ -226,6 +267,8 @@ async function create(body, principal, { models = getModels() } = {}) {
 async function update(id, body, principal, options = {}) {
   const models = options.models ?? getModels();
   const asset = await getById(id, principal, { models });
+  // P3 (§64.3): the whole asset — not while another department has units of it.
+  await assertAssetWideChange(principal, asset);
 
   if (body.institutionId !== undefined) {
     assertCanAssignInstitution(principal, body.institutionId);
@@ -302,6 +345,7 @@ async function update(id, body, principal, options = {}) {
 async function setActive(id, isActive, principal, options = {}) {
   const models = options.models ?? getModels();
   const asset = await getById(id, principal, { models });
+  await assertAssetWideChange(principal, asset);
 
   if (asset.isActive === isActive) {
     throw new ConflictError(`Asset is already ${isActive ? 'active' : 'inactive'}`);
@@ -315,6 +359,7 @@ async function setActive(id, isActive, principal, options = {}) {
 module.exports = {
   list,
   detail,
+  scope,
   create,
   update,
   deactivate: (id, principal, options) => setActive(id, false, principal, options),

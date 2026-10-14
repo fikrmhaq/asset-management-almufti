@@ -19,6 +19,20 @@
  * PIC must document their own units; letting the same codes reach an
  * asset-level file would hand out Asset-wide access off the back of an
  * attachment permission.
+ *
+ * ── Registration photos (REQ-REQUEST-020, migration 061) ─────────────────
+ *
+ * An attachment with `purpose: REGISTRATION_PHOTO` is evidence of what was
+ * registered against a request item. Same endpoint, same permissions, same
+ * scope — all of the above still decides who may upload where. On top of it:
+ *
+ *   JPG / PNG only        the receipt photos' types (`storage.PHOTO_*`)
+ *   a registered target   a unit linked to a request item; for an asset-level
+ *                         photo, an asset with at least one such unit
+ *
+ * Never tied to the REGISTER step's state: the last unit registered closes
+ * that step in the same transaction, and its photo comes after. Not proof of
+ * receipt — receipt photos are request documents (migration 057).
  */
 
 const { getModels } = require('../../db/models');
@@ -27,8 +41,15 @@ const { withTransaction } = require('../../db/withTransaction');
 const { Op, literal } = require('sequelize');
 
 const { NotFoundError, ValidationError } = require('../../errors');
-const { assertCanAccess, assertCanAccessUnit } = require('../../domain/scope');
+const {
+  assertCanAccess,
+  assertCanAccessUnit,
+  assertCanAccessAsset,
+  assertAssetWideChange,
+  unitDepartmentScope,
+} = require('../../domain/scope');
 const { organizationScope } = require('../../auth/principal');
+const { ATTACHMENT_PURPOSES } = require('../../domain/attachmentPurposes');
 const storage = require('../../services/storage');
 const assetService = require('../assets/service');
 
@@ -44,9 +65,10 @@ const assetService = require('../assets/service');
  */
 function unitAttachmentFilter(principal) {
   const scope = organizationScope(principal);
-  if (!scope.picScoped) return {};
+  const departments = unitDepartmentScope(principal);
+  if (!departments) return {};
 
-  const ids = [...scope.picDepartmentIds];
+  const ids = [...departments];
 
   // A caller holding no post reaches no unit. `IN ()` cannot be spelled, and
   // Sequelize renders an empty array as `IN (NULL)`, which matches nothing —
@@ -56,13 +78,21 @@ function unitAttachmentFilter(principal) {
   const sequelize = getSequelize();
   const escaped = ids.map((id) => sequelize.escape(id)).join(', ');
 
-  return {
+  const ownUnits = {
     assetUnitId: {
       [Op.in]: literal(
         `(SELECT "id" FROM "public"."asset_units" WHERE "department_id" IN (${escaped}))`
       ),
     },
   };
+  if (scope.picScoped) return ownUnits;
+
+  /**
+   * A department-bound operator (P3, §64.3) reaches the asset itself — it has a
+   * unit of theirs — so its asset-level files are theirs to read too; other
+   * departments' units' files are not.
+   */
+  return { [Op.or]: [{ assetUnitId: null }, ownUnits] };
 }
 
 function serialize(attachment) {
@@ -75,8 +105,37 @@ function serialize(attachment) {
     // BIGINT arrives as a string from the driver; a file size fits a Number.
     fileSize: Number(attachment.fileSize),
     uploadedBy: attachment.uploadedBy,
+    // REQ-REQUEST-020: null for an ordinary attachment.
+    purpose: attachment.purpose ?? null,
     createdAt: attachment.createdAt,
   };
+}
+
+const [REGISTRATION_PHOTO] = ATTACHMENT_PURPOSES;
+
+/**
+ * REQ-REQUEST-020: a registration photo's target was registered against a
+ * request item — the unit itself, or for an asset-level photo any unit of the
+ * asset. Checked after scope, so an unreachable target is still `404`.
+ *
+ * @throws {ValidationError}
+ */
+async function assertRegisteredTarget(assetId, assetUnitId, { models }) {
+  const linked = assetUnitId
+    ? await models.RequestItemUnit.count({ where: { assetUnitId } })
+    : await models.RequestItemUnit.count({
+        include: [{ association: 'assetUnit', attributes: [], where: { assetId }, required: true }],
+      });
+  if (linked > 0) return;
+
+  throw new ValidationError('Only a registered asset or unit takes a registration photo', [
+    {
+      field: 'purpose',
+      issue: assetUnitId
+        ? 'a registration photo is of a unit registered against a request item'
+        : 'a registration photo of the asset needs a unit of it registered against a request item',
+    },
+  ]);
 }
 
 /** Attachments on one asset — REQ-FILE-002. */
@@ -124,6 +183,17 @@ async function getById(id, principal, { models = getModels() } = {}) {
       : null;
 
     assertCanAccessUnit(principal, unit, { label: 'Attachment' });
+  } else if (unitDepartmentScope(principal)) {
+    // P3 (§64.3): a unit's file, if the unit is theirs; the asset's own file, if
+    // the asset is within their reach. Otherwise `404`, like the record itself.
+    if (attachment.assetUnitId) {
+      const unit = await models.AssetUnit.findByPk(attachment.assetUnitId, {
+        attributes: ['id', 'departmentId'],
+      });
+      assertCanAccessUnit(principal, unit, { label: 'Attachment' });
+    } else {
+      await assertCanAccessAsset(principal, attachment.asset, { label: 'Attachment' });
+    }
   }
 
   return attachment;
@@ -135,8 +205,20 @@ async function create(assetId, file, body, principal, options = {}) {
   const models = options.models ?? getModels();
   const sequelize = options.sequelize ?? getSequelize();
 
-  await assetService.getById(assetId, principal, { models });
-  storage.assertAllowedType(file, { label: 'attachment' });
+  const asset = await assetService.getById(assetId, principal, { models });
+  const registrationPhoto = body.purpose === REGISTRATION_PHOTO;
+  storage.assertAllowedType(
+    file,
+    registrationPhoto
+      ? {
+          label: 'registration photo',
+          mimeTypes: storage.PHOTO_MIME_TYPES,
+          extensions: storage.PHOTO_EXTENSIONS,
+        }
+      : { label: 'attachment' }
+  );
+  // P3 (§64.3): a file on the asset itself concerns every department's units.
+  if (!body.assetUnitId) await assertAssetWideChange(principal, asset);
 
   /**
    * A PIC-scoped caller must file against a unit they hold — `CR-004` §6.5.
@@ -168,6 +250,8 @@ async function create(assetId, file, body, principal, options = {}) {
     assertCanAccessUnit(principal, unit, { label: 'Asset unit' });
   }
 
+  if (registrationPhoto) await assertRegisteredTarget(assetId, body.assetUnitId, { models });
+
   // Sharded by asset id — `05-infrastructure.md` §5.2.
   const stored = await storage.store(file, { shard: assetId });
 
@@ -183,6 +267,7 @@ async function create(assetId, file, body, principal, options = {}) {
             fileSize: stored.fileSize,
             storageReference: stored.storageReference,
             uploadedBy: principal.userId,
+            purpose: body.purpose ?? null,
           },
           { transaction }
         ),
@@ -210,6 +295,7 @@ async function remove(id, principal, options = {}) {
   const models = options.models ?? getModels();
   const sequelize = options.sequelize ?? getSequelize();
   const attachment = await getById(id, principal, { models });
+  if (!attachment.assetUnitId) await assertAssetWideChange(principal, attachment.asset);
   const { storageReference } = attachment;
 
   await withTransaction(async (transaction) => attachment.destroy({ transaction }), { sequelize });

@@ -20,9 +20,10 @@
 
 const { Op, literal } = require('sequelize');
 
-const { NotFoundError, ValidationError } = require('../errors');
+const { NotFoundError, ValidationError, ForbiddenError } = require('../errors');
 const { organizationScope } = require('../auth/principal');
 const { getSequelize } = require('../db/sequelize');
+const { operatingDepartments } = require('./operatingScope');
 
 /**
  * A `where` fragment restricting a query to the caller's scope.
@@ -108,6 +109,28 @@ function defaultInstitutionFor(principal, supplied) {
  */
 
 /**
+ * The departments a caller's Asset Unit reach is narrowed to, or `null`.
+ *
+ * TWO SOURCES, ONE RULE. A PIC-scoped caller: the departments they are
+ * currently PIC of (`CR-003`). A department-bound operator — a KAJUR or a
+ * TOOLMAN (P3, `IMPLEMENTATION_PLAN.md` §64.3, `domain/operatingScope.js`):
+ * the departments of those posts. Everyone else: `null`, no narrowing, their
+ * reach decided by the institution exactly as before. The two never apply
+ * together — operating scope is not loaded for a PIC-scoped principal.
+ *
+ * Every narrowing below reads this, so both kinds of scope are applied at the
+ * same call sites and neither can be forgotten on its own.
+ *
+ * @returns {Set<string>|null}
+ */
+function unitDepartmentScope(principal) {
+  const scope = organizationScope(principal);
+  if (scope.unrestricted) return null;
+  if (scope.picScoped) return scope.picDepartmentIds ?? new Set();
+  return operatingDepartments(principal);
+}
+
+/**
  * A `where` fragment narrowing an Asset Unit query to the caller's reach.
  *
  * Contributes NOTHING for system-wide and institution callers — their scope is
@@ -117,8 +140,8 @@ function defaultInstitutionFor(principal, supplied) {
  * @returns {object} `{}` unless the caller is PIC-scoped
  */
 function unitScopeFilter(principal) {
-  const scope = organizationScope(principal);
-  if (!scope.picScoped) return {};
+  const departments = unitDepartmentScope(principal);
+  if (!departments) return {};
 
   /**
    * `IN (…)` never matches NULL, which is precisely the rule: a unit with no
@@ -129,7 +152,7 @@ function unitScopeFilter(principal) {
    * An empty set yields `IN ()`, which matches nothing. A PIC-scoped user who
    * holds no post reaches no units, which is correct.
    */
-  return { departmentId: { [Op.in]: [...scope.picDepartmentIds] } };
+  return { departmentId: { [Op.in]: [...departments] } };
 }
 
 /**
@@ -143,10 +166,10 @@ function unitScopeFilter(principal) {
  * @throws {NotFoundError}
  */
 function assertCanAccessUnit(principal, unit, { label = 'Asset unit' } = {}) {
-  const scope = organizationScope(principal);
-  if (!scope.picScoped) return unit;
+  const departments = unitDepartmentScope(principal);
+  if (!departments) return unit;
 
-  if (!unit?.departmentId || !scope.picDepartmentIds.has(unit.departmentId)) {
+  if (!unit?.departmentId || !departments.has(unit.departmentId)) {
     throw new NotFoundError(`${label} not found`);
   }
 
@@ -175,12 +198,163 @@ function assertCanAccessUnit(principal, unit, { label = 'Asset unit' } = {}) {
  * @throws {ValidationError}
  */
 function assertCanAssignDepartment(principal, departmentId, { field = 'departmentId' } = {}) {
-  if (!organizationScope(principal).picScoped) return;
+  const scope = organizationScope(principal);
+  if (!scope.picScoped) {
+    /**
+     * A department-bound operator (P3, §64.3) assigns units to their own
+     * department and nowhere else: not to another Jurusan, and not to none — a
+     * unit with no department is outside their reach the moment it is written.
+     */
+    const departments = scope.unrestricted ? null : operatingDepartments(principal);
+    if (departments && !(departmentId && departments.has(departmentId))) {
+      throw new ValidationError('The unit must belong to your department', [
+        {
+          field,
+          issue:
+            'a Kajur or Toolman assigns units to their own department only — not to another, and not to none',
+        },
+      ]);
+    }
+    return;
+  }
 
   throw new ValidationError("You cannot change an asset unit's department", [
     {
       field,
       issue: 'moving a unit between departments requires institution scope (CR-003)',
+    },
+  ]);
+}
+
+// --- Asset scope through its units — P3 (`IMPLEMENTATION_PLAN.md` §64.3) -----
+
+/**
+ * The SQL test "this asset has a unit in `departments`". `assetRef` is how the
+ * surrounding query names the asset's id. Uses `idx_asset_units_asset`.
+ */
+function assetHasUnitInSql(assetRef, departments, sequelize) {
+  if (departments.size === 0) return 'FALSE';
+  const ids = [...departments].map((id) => sequelize.escape(id)).join(', ');
+  return `EXISTS (SELECT 1 FROM "public"."asset_units" u
+    WHERE u."asset_id" = ${assetRef} AND u."department_id" IN (${ids}))`;
+}
+
+/**
+ * A `where` fragment narrowing an Asset query to the assets a department-bound
+ * operator reaches: those with at least one unit in their departments. An Asset
+ * has no department of its own, so its reach is derived from its units; an
+ * asset with no unit, or only other departments' units, is out of reach.
+ *
+ * `{}` for everyone else — including a PIC-scoped caller, whose permission
+ * ceiling carries no `asset:read`, so their Asset reach is unchanged here.
+ *
+ * @param {object} [options]
+ * @param {string} [options.assetRef] the id column as the query names it
+ */
+function assetScopeFilter(
+  principal,
+  { assetRef = '"Asset"."id"', sequelize = getSequelize() } = {}
+) {
+  const scope = organizationScope(principal);
+  if (scope.unrestricted || scope.picScoped) return {};
+  const departments = operatingDepartments(principal);
+  if (!departments) return {};
+  return { [Op.and]: [literal(`(${assetHasUnitInSql(assetRef, departments, sequelize)})`)] };
+}
+
+/**
+ * Guards an Asset already loaded: `404` for a department-bound operator when
+ * none of its units is theirs — indistinguishable from an asset that does not
+ * exist, like every other scope refusal.
+ *
+ * @throws {NotFoundError}
+ */
+async function assertCanAccessAsset(
+  principal,
+  asset,
+  { label = 'Asset', sequelize = getSequelize(), transaction } = {}
+) {
+  const scope = organizationScope(principal);
+  if (scope.unrestricted || scope.picScoped) return asset;
+  const departments = operatingDepartments(principal);
+  if (!departments) return asset;
+
+  const [row] = await sequelize.query(
+    `SELECT ${assetHasUnitInSql(sequelize.escape(asset.id), departments, sequelize)} AS "reach"`,
+    { type: sequelize.QueryTypes.SELECT, transaction }
+  );
+  if (!row?.reach) throw new NotFoundError(`${label} not found`);
+  return asset;
+}
+
+/**
+ * Guards an operation on the WHOLE asset — its name, classification, activity,
+ * attribute values, an asset-level file. A department-bound operator may do it
+ * only when every unit of the asset is in their departments: otherwise it would
+ * change what another department sees about its own units.
+ *
+ * `ForbiddenError`, not `404`: the asset is legitimately visible to them (it
+ * has a unit of theirs); it is the operation that is unavailable — the
+ * distinction `CR-004` §12 draws.
+ *
+ * @throws {ForbiddenError}
+ */
+async function assertAssetWideChange(principal, asset, options = {}) {
+  if (!(await mayChangeWholeAsset(principal, asset, options))) {
+    throw new ForbiddenError('This asset also has units outside your department', [
+      {
+        issue:
+          "a change to the whole asset would affect another department's units; " +
+          'change your own units instead, or ask Sarpras (P3)',
+      },
+    ]);
+  }
+}
+
+/**
+ * Whether a whole-asset change is open to the caller — the rule
+ * `assertAssetWideChange` enforces, as a flag the screens can read (P3 UI) so
+ * they never offer what the server refuses. `true` for everyone but a
+ * department-bound operator on an asset with a unit outside their departments.
+ *
+ * @returns {Promise<boolean>}
+ */
+async function mayChangeWholeAsset(
+  principal,
+  asset,
+  { sequelize = getSequelize(), transaction } = {}
+) {
+  const scope = organizationScope(principal);
+  if (scope.unrestricted || scope.picScoped) return true;
+  const departments = operatingDepartments(principal);
+  if (!departments) return true;
+
+  const ids = [...departments].map((id) => sequelize.escape(id)).join(', ');
+  const [row] = await sequelize.query(
+    `SELECT EXISTS (SELECT 1 FROM "public"."asset_units" u
+       WHERE u."asset_id" = ${sequelize.escape(asset.id)}
+         AND (u."department_id" IS NULL OR u."department_id" NOT IN (${ids}))) AS "shared"`,
+    { type: sequelize.QueryTypes.SELECT, transaction }
+  );
+  return !row?.shared;
+}
+
+/**
+ * A standalone `POST /assets` creates an asset with no unit — which a
+ * department-bound operator could then never see again. They register through a
+ * request, or add a unit to an asset they can see (P3, §64.3).
+ *
+ * @throws {ForbiddenError}
+ */
+function assertCanCreateStandaloneAsset(principal) {
+  const scope = organizationScope(principal);
+  if (scope.unrestricted || scope.picScoped) return;
+  if (!operatingDepartments(principal)) return;
+  throw new ForbiddenError('A Kajur or Toolman cannot create an asset on its own', [
+    {
+      issue:
+        'an asset with no unit would be outside your department at once; register units ' +
+        'through a request, or add a unit to an asset your department already has',
     },
   ]);
 }
@@ -266,11 +440,11 @@ function hasItemsSql(spec, parentRef) {
  * @returns {object} `{}` unless the caller is PIC-scoped
  */
 function unitCoverageFilter(principal, spec, { sequelize = getSequelize() } = {}) {
-  const scope = organizationScope(principal);
-  if (!scope.picScoped) return {};
+  const departments = unitDepartmentScope(principal);
+  if (!departments) return {};
 
   const parentRef = `${spec.parentTable}."id"`;
-  const clauses = [noForeignUnitSql(spec, parentRef, [...scope.picDepartmentIds], sequelize)];
+  const clauses = [noForeignUnitSql(spec, parentRef, [...departments], sequelize)];
 
   if (spec.allowEmptyForCreator) {
     /**
@@ -311,8 +485,8 @@ function unitCoverageFilter(principal, spec, { sequelize = getSequelize() } = {}
 async function assertCanAccessByUnits(principal, record, spec, options = {}) {
   const { label = 'Resource', sequelize = getSequelize(), transaction } = options;
 
-  const scope = organizationScope(principal);
-  if (!scope.picScoped) return record;
+  const departments = unitDepartmentScope(principal);
+  if (!departments) return record;
   if (!record) throw new NotFoundError(`${label} not found`);
 
   const parentRef = sequelize.escape(record.id);
@@ -321,7 +495,7 @@ async function assertCanAccessByUnits(principal, record, spec, options = {}) {
     `SELECT ${noForeignUnitSql(
       spec,
       parentRef,
-      [...scope.picDepartmentIds],
+      [...departments],
       sequelize
     )} AS "noForeignUnit", ${hasItemsSql(spec, parentRef)} AS "hasItems"`,
     { type: sequelize.QueryTypes.SELECT, transaction }
@@ -342,9 +516,15 @@ module.exports = {
   assertCanAccess,
   assertCanAssignInstitution,
   defaultInstitutionFor,
+  unitDepartmentScope,
   unitScopeFilter,
   assertCanAccessUnit,
   assertCanAssignDepartment,
+  assetScopeFilter,
+  assertCanAccessAsset,
+  assertAssetWideChange,
+  mayChangeWholeAsset,
+  assertCanCreateStandaloneAsset,
   BORROWING_COVERAGE,
   TRANSACTION_COVERAGE,
   unitCoverageFilter,

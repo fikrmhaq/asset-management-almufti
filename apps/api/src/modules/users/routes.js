@@ -10,6 +10,7 @@ const { asyncHandler } = require('../../http/asyncHandler');
 const { sendItem, sendCreated, sendList } = require('../../http/respond');
 const { validate } = require('../../middleware/validate');
 const { requirePermission } = require('../../middleware/authorize');
+const { userPositionRoutes } = require('../positionAssignments/routes');
 
 function usersRouter() {
   const router = Router();
@@ -99,6 +100,9 @@ function usersRouter() {
       sendItem(res, await service.removeRole(req.params.id, req.params.roleId, req.principal));
     })
   );
+
+  // School positions — Phase 35 (`CR-014`), `06-api.md` §12.1.
+  userPositionRoutes(router);
 
   return router;
 }

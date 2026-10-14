@@ -21,6 +21,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { toast } from '@/components/ui/toast';
 import { Field, FormErrorSummary } from '@/components/form/field';
 import { DetailPage, DetailTabs, SectionCard } from '@/components/patterns/page';
+import { PositionAssignmentsPanel } from '@/components/organization/PositionAssignmentsPanel';
 import { institutions, roles as rolesResource, users } from './resources';
 
 /**
@@ -237,6 +238,7 @@ export function UserDetailPage() {
   const query = users.useDetail(id);
   const setActive = users.useSetActive();
   const [confirming, setConfirming] = useState(false);
+  const canReadPositions = usePermission('position-assignment:read');
 
   const user = query.data;
 
@@ -271,6 +273,23 @@ export function UserDetailPage() {
             label: t('organization.users.roles'),
             content: <RolesTab id={id} user={user} />,
           },
+          // Phase 35 (`CR-014`): school positions — a separate authority from
+          // roles, and granting nothing (`BR-028`).
+          ...(canReadPositions
+            ? [
+                {
+                  value: 'positions',
+                  label: t('positions.title'),
+                  content: (
+                    <PositionAssignmentsPanel
+                      mode="user"
+                      userId={id}
+                      institutionId={user.institutionId}
+                    />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
 

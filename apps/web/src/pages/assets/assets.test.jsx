@@ -8,6 +8,7 @@ import * as referenceApi from '@/api/reference';
 import * as organizationApi from '@/api/organization';
 import * as procurementApi from '@/api/procurement';
 import { renderScreen, signInWith } from '@/test/harness';
+import { fakePreview } from '@/test/inventoryCodePreview';
 import { AssetsPage } from './AssetsPage';
 import { AssetFormPage } from './AssetFormPage';
 import { AssetDetailPage } from './AssetDetailPage';
@@ -85,8 +86,21 @@ const ASSET_ROW = {
   isActive: true,
 };
 
+/** The caller's own asset reach (P3): unscoped unless a test says otherwise. */
+const INSTITUTION_SCOPE = { departmentScoped: false, departments: [], createStandaloneAsset: true };
+const TKJ_SCOPE = {
+  departmentScoped: true,
+  departments: [{ id: 'dept-tkj', code: 'TKJ', name: 'Teknik Komputer' }],
+  createStandaloneAsset: false,
+};
+
 beforeEach(() => {
   signInWith(ALL);
+  vi.spyOn(assetCoreApi.assetsApi, 'scope').mockResolvedValue(INSTITUTION_SCOPE);
+  // P4 (§64.4): the live inventory-code preview beside a unit number.
+  vi.spyOn(assetCoreApi.inventoryCodesApi, 'preview').mockImplementation((body) =>
+    Promise.resolve(fakePreview(body))
+  );
   vi.spyOn(assetCoreApi.assetsApi, 'list').mockResolvedValue(page([ASSET_ROW]));
   vi.spyOn(assetCoreApi.locationsApi, 'list').mockResolvedValue(page([]));
   vi.spyOn(organizationApi.institutionsApi, 'list').mockResolvedValue(
@@ -369,6 +383,102 @@ describe('AssetDetailPage', () => {
   });
 });
 
+/**
+ * P3 (§64.3, REQ-AUTHZ-009): the screens offer a Kajur / Toolman only what the
+ * server allows — no standalone asset, no whole-asset change on an asset another
+ * department shares, units added to their own department only.
+ */
+describe('a department-bound operator (P3)', () => {
+  const renderDetail = () =>
+    renderScreen(<AssetDetailPage />, { path: '/assets/:id', route: '/assets/asset-1' });
+
+  beforeEach(() => {
+    vi.spyOn(assetCoreApi.assetsApi, 'listUnits').mockResolvedValue(page([]));
+    vi.spyOn(assetCoreApi.assetsApi, 'attributeValues').mockResolvedValue([]);
+    vi.spyOn(assetCoreApi.assetsApi, 'listAttachments').mockResolvedValue([
+      {
+        id: 'att-asset',
+        fileName: 'manual.pdf',
+        fileType: 'application/pdf',
+        fileSize: 10,
+        assetUnitId: null,
+        createdAt: '2026-09-01T00:00:00Z',
+      },
+    ]);
+  });
+
+  it('offers no standalone New asset', async () => {
+    assetCoreApi.assetsApi.scope.mockResolvedValue(TKJ_SCOPE);
+    renderScreen(<AssetsPage />);
+
+    await screen.findByText('Laptop Dell');
+    await waitFor(() => expect(assetCoreApi.assetsApi.scope).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByRole('link', { name: 'New asset' })).not.toBeInTheDocument()
+    );
+  });
+
+  it('keeps New asset for an institution-scoped caller', async () => {
+    renderScreen(<AssetsPage />);
+    expect(await screen.findByRole('link', { name: 'New asset' })).toBeInTheDocument();
+  });
+
+  it('hides whole-asset changes on an asset another department shares, and says why', async () => {
+    vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue({
+      ...ASSET,
+      scope: { wholeAssetChange: false },
+    });
+    renderDetail();
+
+    await screen.findByRole('heading', { name: 'Laptop Dell' });
+    expect(screen.getByTestId('shared-asset-note')).toHaveTextContent(/made by Sarpras/);
+    expect(screen.queryByRole('link', { name: 'Edit' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Deactivate' })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Attachments' }));
+    expect(await screen.findByText('manual.pdf')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Upload a file' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete manual.pdf' })).not.toBeInTheDocument();
+  });
+
+  it('keeps whole-asset changes when every unit is theirs', async () => {
+    vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue({
+      ...ASSET,
+      scope: { wholeAssetChange: true },
+    });
+    renderDetail();
+
+    expect(await screen.findByRole('link', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Deactivate' })).toBeInTheDocument();
+    expect(screen.queryByTestId('shared-asset-note')).not.toBeInTheDocument();
+  });
+
+  it('adds a unit to their own department only — shown, not chosen — and sends it', async () => {
+    assetCoreApi.assetsApi.scope.mockResolvedValue(TKJ_SCOPE);
+    vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue({
+      ...ASSET,
+      scope: { wholeAssetChange: false },
+    });
+    const createUnit = vi
+      .spyOn(assetCoreApi.assetsApi, 'createUnit')
+      .mockResolvedValue({ id: 'unit-9' });
+
+    renderDetail();
+    await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByTestId('unit-department-fixed')).toHaveTextContent('TKJ');
+    expect(
+      within(dialog).getByText('Units you add belong to your own department.')
+    ).toBeInTheDocument();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(createUnit).toHaveBeenCalled());
+    expect(createUnit.mock.calls[0][1]).toMatchObject({ departmentId: 'dept-tkj' });
+  });
+});
+
 describe('attribute values (§18.7, REQ-ATTR-006/008)', () => {
   const DEFINITIONS = [
     {
@@ -502,11 +612,62 @@ describe('AssetUnitDetailPage', () => {
     });
 
   /**
+   * The Request a unit was registered against — Phase 40 (`CR-014` D7). The
+   * server sends it only when the viewer can see that Request; the page shows
+   * exactly what it is given.
+   */
+  describe('requested via (CR-014 D7)', () => {
+    it('links to the Request the unit was registered against', async () => {
+      assetCoreApi.assetUnitsApi.get.mockResolvedValue({
+        ...UNIT,
+        requestItem: {
+          requestId: 'req-7',
+          requestNumber: 'REQ/2026/0007',
+          itemId: 'item-1',
+          description: 'Kursi',
+        },
+      });
+      renderUnit();
+
+      const link = await screen.findByRole('link', { name: 'REQ/2026/0007' });
+      expect(link).toHaveAttribute('href', '/requests/req-7');
+    });
+
+    it('shows nothing when there is no reference', async () => {
+      renderUnit();
+
+      expect((await screen.findAllByText('Serial 123')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('Requested via')).not.toBeInTheDocument();
+    });
+  });
+
+  /**
    * Department display and assignment — Phase 20 (`CR-003`).
    *
    * Before this phase the field rendered `unit.departmentId`, because the detail
    * endpoint returned nothing else, and no form anywhere could set it.
    */
+  describe('funding source (REQ-UNIT-012)', () => {
+    it('shows the unit’s own funding source, with its code', async () => {
+      assetCoreApi.assetUnitsApi.get.mockResolvedValue({
+        ...UNIT,
+        fundingSourceId: 3,
+        fundingSource: { id: 3, code: 'KMT', name: 'Komite' },
+      });
+      renderUnit();
+
+      expect(await screen.findByText('Komite (KMT)')).toBeInTheDocument();
+      expect(screen.getByText('Funding source')).toBeInTheDocument();
+    });
+
+    it('shows nothing when the unit recorded none', async () => {
+      renderUnit();
+
+      expect((await screen.findAllByText('Serial 123')).length).toBeGreaterThan(0);
+      expect(screen.queryByText('Funding source')).not.toBeInTheDocument();
+    });
+  });
+
   describe('department (REQ-ORG-004)', () => {
     const DEPARTMENT = {
       id: 'dept-1',
@@ -724,6 +885,58 @@ describe('AssetUnitDetailPage', () => {
     expect(screen.queryByRole('tab', { name: 'Transactions' })).not.toBeInTheDocument();
   });
 
+  /** REQ-REQUEST-024: a receipt placement is a location, never an assessment. */
+  it('labels a SYSTEM placement row, which carries no condition', async () => {
+    assetCoreApi.assetUnitsApi.history.mockResolvedValue(
+      page([
+        {
+          id: 'h-1',
+          assetUnitId: 'unit-1234abcd',
+          description: 'Placed at the intended location on receipt (REQ/2026/0021)',
+          condition: null,
+          locationId: 'loc-1',
+          lifecycleState: 'REGISTERED',
+          entryType: 'SYSTEM',
+          effectiveFrom: '2026-10-05T03:00:00.000Z',
+          effectiveTo: null,
+        },
+      ])
+    );
+
+    renderUnit();
+    await userEvent.click(await screen.findByRole('tab', { name: 'History' }));
+
+    expect(await screen.findByText('Placed on receipt')).toBeInTheDocument();
+    expect(
+      screen.getByText('Placed at the intended location on receipt (REQ/2026/0021)')
+    ).toBeInTheDocument();
+  });
+
+  /** REQ-REQUEST-025: a confirmed Room PIC report. */
+  it('labels a REPORT row as coming from a report', async () => {
+    assetCoreApi.assetUnitsApi.history.mockResolvedValue(
+      page([
+        {
+          id: 'h-2',
+          assetUnitId: 'unit-1234abcd',
+          description: 'Layar retak — reported by Guru TKJ',
+          condition: 'DAMAGED',
+          locationId: 'loc-1',
+          lifecycleState: 'ACTIVE',
+          entryType: 'REPORT',
+          effectiveFrom: '2026-10-05T03:00:00.000Z',
+          effectiveTo: null,
+        },
+      ])
+    );
+
+    renderUnit();
+    await userEvent.click(await screen.findByRole('tab', { name: 'History' }));
+
+    expect(await screen.findByText('From a report')).toBeInTheDocument();
+    expect(screen.getByText('Layar retak — reported by Guru TKJ')).toBeInTheDocument();
+  });
+
   it('records condition, location and lifecycle as ONE entry (03-domain.md §4.12)', async () => {
     const record = vi.spyOn(assetCoreApi.assetUnitsApi, 'recordHistory').mockResolvedValue({});
 
@@ -884,7 +1097,7 @@ describe('asset unit → contract item', () => {
    * detail, never from the format itself: `inventory-code-format:read` is an
    * administration permission a registrar has no reason to hold.
    */
-  describe('number composition (CR-007)', () => {
+  describe('unit number (CR-007; named so by P4)', () => {
     const asking = (overrides = {}) => ({
       ...ASSET,
       unitRegistration: {
@@ -903,7 +1116,7 @@ describe('asset unit → contract item', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
 
       const dialog = screen.getByRole('dialog');
-      await userEvent.type(within(dialog).getByLabelText(/Number composition/), '001-02-03');
+      await userEvent.type(within(dialog).getByLabelText(/^Unit number/), '001-02-03');
       await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
 
       await waitFor(() => expect(createUnit).toHaveBeenCalled());
@@ -923,9 +1136,11 @@ describe('asset unit → contract item', () => {
       await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
       await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
 
-      expect(screen.queryByLabelText(/Number composition/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^Unit number/)).not.toBeInTheDocument();
 
-      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create' }));
+      await userEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Create' })
+      );
 
       await waitFor(() => expect(createUnit).toHaveBeenCalled());
       // Strict write bodies: an unexpected key is a 400, not something ignored.
@@ -952,10 +1167,129 @@ describe('asset unit → contract item', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
 
       const dialog = screen.getByRole('dialog');
-      await userEvent.type(within(dialog).getByLabelText(/Number composition/), '001-02-03');
+      await userEvent.type(within(dialog).getByLabelText(/^Unit number/), '001-02-03');
       await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
 
       expect(await screen.findByText(/a unit already carries that code/i)).toBeInTheDocument();
+    });
+
+    /**
+     * P4 (`IMPLEMENTATION_PLAN.md` §64.4): the code it becomes, live, from the
+     * same inputs the save sends; recent unit numbers for reference; an empty
+     * value refused before the server is asked. The server still decides.
+     */
+    it('shows the inventory code the unit number becomes, from the save’s own inputs (P4)', async () => {
+      vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue(asking());
+      assetCoreApi.inventoryCodesApi.preview.mockImplementation((body) =>
+        Promise.resolve(fakePreview(body, { recent: ['1.5'] }))
+      );
+
+      renderDetail();
+      await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+      const dialog = screen.getByRole('dialog');
+      await userEvent.type(within(dialog).getByLabelText(/^Unit number/), '1.6');
+
+      await waitFor(() =>
+        expect(assetCoreApi.inventoryCodesApi.preview).toHaveBeenLastCalledWith({
+          assetId: 'asset-1',
+          departmentId: null,
+          unitNumbers: ['1.6'],
+        })
+      );
+      expect(await within(dialog).findByText('Not issued yet.')).toBeInTheDocument();
+      expect(within(dialog).getByTestId('inventory-code-0')).toHaveTextContent(
+        '1.6/LAP_TOP/BOS_REG/2026'
+      );
+      expect(within(dialog).getByText('Recently used unit numbers')).toBeInTheDocument();
+      expect(within(dialog).getByText('1.5')).toBeInTheDocument();
+    });
+
+    it('refuses an empty unit number without asking the server to register (P4)', async () => {
+      vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue(asking());
+      const createUnit = vi.spyOn(assetCoreApi.assetsApi, 'createUnit');
+
+      renderDetail();
+      await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+      const dialog = screen.getByRole('dialog');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+      expect(await within(dialog).findByText('A unit number is required.')).toBeInTheDocument();
+      expect(createUnit).not.toHaveBeenCalled();
+    });
+
+    it('previews a Kajur’s unit in their own department (P3 + P4)', async () => {
+      assetCoreApi.assetsApi.scope.mockResolvedValue(TKJ_SCOPE);
+      vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue(asking());
+
+      renderDetail();
+      await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+      await screen.findByTestId('unit-department-fixed');
+      await userEvent.type(
+        within(screen.getByRole('dialog')).getByLabelText(/^Unit number/),
+        '2.1'
+      );
+      await waitFor(() =>
+        expect(assetCoreApi.inventoryCodesApi.preview).toHaveBeenLastCalledWith(
+          expect.objectContaining({ departmentId: 'dept-tkj', unitNumbers: ['2.1'] })
+        )
+      );
+    });
+  });
+
+  /**
+   * REQ-UNIT-012 (migration 056): the unit's own funding source, offered where
+   * the institution's code carries it. A contractless asset needs it there.
+   */
+  describe('funding source (REQ-UNIT-012)', () => {
+    it('offers the funding source where the code carries it, and sends the choice', async () => {
+      signInWith([...ALL, 'funding-source:read']);
+      vi.spyOn(referenceApi.lookupApis['funding-sources'], 'list').mockResolvedValue(
+        page([{ id: 3, name: 'Komite', code: 'KMT' }])
+      );
+      vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue({
+        ...ASSET,
+        unitRegistration: {
+          numberComposition: { required: false },
+          fundingSource: { inCode: true },
+        },
+      });
+      const createUnit = vi
+        .spyOn(assetCoreApi.assetsApi, 'createUnit')
+        .mockResolvedValue({ id: 'unit-9' });
+
+      renderDetail();
+      await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+      const dialog = screen.getByRole('dialog');
+      await within(dialog).findByRole('option', { name: 'Komite' });
+      await userEvent.selectOptions(within(dialog).getByLabelText(/Funding source/), '3');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => expect(createUnit).toHaveBeenCalled());
+      expect(createUnit.mock.calls[0][1]).toMatchObject({ fundingSourceId: 3 });
+    });
+
+    it('does not offer it where the code does not carry it', async () => {
+      vi.spyOn(assetCoreApi.assetsApi, 'get').mockResolvedValue({
+        ...ASSET,
+        unitRegistration: {
+          numberComposition: { required: false },
+          fundingSource: { inCode: false },
+        },
+      });
+
+      renderDetail();
+      await userEvent.click(await screen.findByRole('tab', { name: 'Units' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'Add unit' }));
+
+      expect(screen.queryByLabelText(/Funding source/)).not.toBeInTheDocument();
     });
   });
 

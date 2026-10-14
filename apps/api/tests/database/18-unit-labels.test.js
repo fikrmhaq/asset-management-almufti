@@ -377,6 +377,89 @@ describe('batch labels (REQ-UNIT-010)', () => {
   });
 });
 
+describe('labels for selected units (§73)', () => {
+  const labels = (ids, caller = admin) =>
+    api()
+      .get(`${V1}/asset-units/labels`)
+      .query({ ids: ids.join(',') })
+      .set(...caller.auth);
+  const single = (id) =>
+    api()
+      .get(`${V1}/asset-units/${id}/label`)
+      .set(...admin.auth);
+
+  it('returns, in the order selected, exactly the label each unit has on its own', async () => {
+    const laptop = await createAsset();
+    const printer = await createAsset({ name: 'Epson L3210' });
+    const one = await createUnit(laptop.id);
+    const two = await createUnit(laptop.id);
+    const three = await createUnit(printer.id);
+
+    const response = await labels([three.id, one.id, two.id]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((row) => row.assetUnitId)).toEqual([three.id, one.id, two.id]);
+    // The batch builds no payload of its own: each entry IS the single label.
+    for (const unit of [one, two, three]) {
+      const own = (await single(unit.id)).body.data;
+      expect(response.body.data.find((row) => row.assetUnitId === unit.id)).toEqual(own);
+    }
+  });
+
+  it('prints one selected unit', async () => {
+    const asset = await createAsset();
+    const unit = await createUnit(asset.id);
+
+    const response = await labels([unit.id]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data).toHaveLength(1);
+    expect(response.body.data[0].inventoryCode).toBe(unit.inventoryCode);
+  });
+
+  it('refuses an empty selection, a malformed id, a repeat and more than 200', async () => {
+    const asset = await createAsset();
+    const unit = await createUnit(asset.id);
+
+    expect((await labels([])).status).toBe(400);
+    expect((await labels(['not-a-uuid'])).status).toBe(400);
+    expect((await labels([unit.id, unit.id])).status).toBe(400);
+    const many = Array.from({ length: 201 }, () => crypto.randomUUID());
+    expect((await labels(many)).status).toBe(400);
+  });
+
+  it('is 404 for the whole batch when any unit is another institution’s', async () => {
+    const own = await createUnit((await createAsset()).id);
+    const foreign = await createUnit((await createAsset({ institutionId: institutionB.id })).id);
+    const scoped = await createCaller({
+      permissions: ['asset-unit:read'],
+      institutionId: institutionA.id,
+    });
+
+    expect((await labels([own.id], scoped)).status).toBe(200);
+    const response = await labels([own.id, foreign.id], scoped);
+    expect(response.status).toBe(404);
+    expect(response.body.data).toBeUndefined();
+  });
+
+  it('needs asset-unit:read', async () => {
+    const unit = await createUnit((await createAsset()).id);
+    const nobody = await createCaller({ permissions: [], institutionId: institutionA.id });
+
+    expect((await labels([unit.id], nobody)).status).toBe(403);
+  });
+
+  it('leaves out a unit with no inventory code, as the per-asset sheet does', async () => {
+    const coded = await createUnit((await createAsset()).id);
+    const uncoded = await createUnit((await createAsset({ institutionId: null })).id);
+
+    const response = await labels([coded.id, uncoded.id]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.map((row) => row.assetUnitId)).toEqual([coded.id]);
+  });
+});
+
 describe('resolution (REQ-UNIT-011)', () => {
   it('resolves a scanned code to its unit', async () => {
     const asset = await createAsset();

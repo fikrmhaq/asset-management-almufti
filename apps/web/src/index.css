@@ -481,11 +481,38 @@
     display: block;
   }
 
+  /* ONLY the labels on the paper (§73 UAT). On a page holding a label sheet,
+     every element that neither holds the sheet nor sits inside it — the page
+     title, its description, the Print button, toasts, anything the shell adds
+     later — is removed, and the ancestors that hold it lose their own layout
+     (sidebar columns, padding, panels), so the sheet starts at the top-left of
+     the page. Scoped by `:has(.print-sheet)`: other pages print as before. */
+  body:has(.print-sheet) *:not(:has(.print-sheet)):not(.print-sheet):not(.print-sheet *) {
+    display: none !important;
+  }
+
+  body:has(.print-sheet) *:has(.print-sheet) {
+    display: block !important;
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+  }
+
   /* Two columns of labels down the page. Fixed rather than responsive: paper
      does not have a viewport, and a label's physical size is the point. */
   .unit-label-sheet {
     display: grid !important;
-    grid-template-columns: repeat(2, 1fr) !important;
+    /* `minmax(0, …)`: a long code wraps inside its label instead of widening
+       the column past the paper's edge. */
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 4mm !important;
   }
 
@@ -496,5 +523,10 @@
     border: 1px solid #999 !important;
     background: #fff !important;
     color: #000 !important;
+  }
+
+  /* Ink, whatever the screen theme: the secondary lines print dark grey. */
+  .unit-label .unit-label-secondary {
+    color: #444 !important;
   }
 }

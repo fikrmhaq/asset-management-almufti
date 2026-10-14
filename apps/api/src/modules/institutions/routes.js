@@ -85,6 +85,30 @@ function institutionsRouter() {
     })
   );
 
+  /**
+   * The Teacher Storage Room — REQ-REQUEST-023. `teacher-storage-room:*`, not
+   * `institution:update`, for the reason given above for the code format; scoped
+   * the same way (another institution is `404`).
+   */
+  router.get(
+    '/:id/teacher-storage-room',
+    requirePermission('teacher-storage-room:read'),
+    validate({ params: schemas.institutionParams }),
+    asyncHandler(async (req, res) => {
+      sendItem(res, await service.getTeacherStorageRoom(req.params.id, req.principal));
+    })
+  );
+
+  // PUT: one value, stated whole. `{ locationId: null }` clears it.
+  router.put(
+    '/:id/teacher-storage-room',
+    requirePermission('teacher-storage-room:update'),
+    validate({ params: schemas.institutionParams, body: schemas.teacherStorageRoom }),
+    asyncHandler(async (req, res) => {
+      sendItem(res, await service.setTeacherStorageRoom(req.params.id, req.body, req.principal));
+    })
+  );
+
   // Status is a guarded transition, not a plain field edit (§1.7), which is why
   // it has its own endpoint and its own permission.
   router.post(

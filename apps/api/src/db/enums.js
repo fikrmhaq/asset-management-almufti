@@ -48,10 +48,19 @@ const ATTRIBUTE_SCOPES = Object.freeze(['ASSET', 'ASSET_UNIT']);
  * satisfies the monthly assessment obligation: a unit whose only entry this
  * month came from a borrowing has not been assessed.
  *
- * `SYSTEM` is reserved and has no writer — see migration 048 for why it is
- * declared now rather than added later.
+ * `SYSTEM` — written by the application as a consequence of a business
+ * event, never an assessment. Its one writer is receipt placement
+ * (REQ-REQUEST-024, migration 064): a unit received `AT_INTENDED_PLACE` is
+ * placed at its intended location with NO condition, which only a `SYSTEM` row
+ * may omit (`chk_longitudinal_history_condition`). See migration 048 for why it
+ * was declared before it had a writer.
+ *
+ * `REPORT` — a Room PIC's CONDITION or MOVEMENT report, confirmed by a reviewer
+ * (REQ-REQUEST-025, migration 065). Never an assessment: the reviewer, not the
+ * department's PIC, writes it, and a confirmed move is no inspection. Its
+ * condition is the reported one, else carried forward, else none.
  */
-const HISTORY_ENTRY_TYPES = Object.freeze(['MANUAL', 'BORROWING', 'SYSTEM']);
+const HISTORY_ENTRY_TYPES = Object.freeze(['MANUAL', 'BORROWING', 'SYSTEM', 'REPORT']);
 
 /** `audit.audit_action` — REQ-AUDIT-002. */
 const AUDIT_ACTIONS = Object.freeze(['CREATE', 'UPDATE', 'DELETE', 'STATUS_CHANGE']);

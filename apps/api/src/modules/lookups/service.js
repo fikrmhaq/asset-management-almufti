@@ -71,7 +71,11 @@ const LOOKUPS = {
      */
     fields: ['code'],
     unique: ['name', 'code'],
-    references: [{ model: 'Contract', column: 'fundingSourceId', label: 'contracts' }],
+    // Units record their own funding source since migration 056 (REQ-UNIT-012).
+    references: [
+      { model: 'Contract', column: 'fundingSourceId', label: 'contracts' },
+      { model: 'AssetUnit', column: 'fundingSourceId', label: 'asset units' },
+    ],
   },
   'transaction-types': {
     model: 'TransactionType',

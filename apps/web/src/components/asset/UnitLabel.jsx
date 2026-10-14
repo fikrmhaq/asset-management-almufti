@@ -46,7 +46,7 @@ export function UnitLabel({ label, origin }) {
 
   return (
     <article
-      className="unit-label flex gap-3 rounded-md border border-border bg-white p-3 text-neutral-900"
+      className="unit-label flex gap-3 rounded-md border border-border bg-white p-3 text-[#111]"
       aria-label={t('assets.label.labelFor', { code: label.inventoryCode })}
     >
       {/* `level="M"` tolerates roughly 15% damage, which is the realistic
@@ -62,13 +62,15 @@ export function UnitLabel({ label, origin }) {
           ) : null}
           <p className="truncate text-sm font-semibold">{label.assetName}</p>
           {label.classification ? (
-            <p className="truncate text-[10px] text-neutral-600">
+            <p className="unit-label-secondary truncate text-[10px] text-[#525252]">
               <span className="font-mono">{label.classification.id}</span>{' '}
               {label.classification.name}
             </p>
           ) : null}
           {label.department ? (
-            <p className="truncate text-[10px] text-neutral-600">{label.department.name}</p>
+            <p className="unit-label-secondary truncate text-[10px] text-[#525252]">
+              {label.department.name}
+            </p>
           ) : null}
         </div>
 

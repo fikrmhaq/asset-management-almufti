@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { ApiError, ERROR_CODES } from '@/api/errors';
 import * as organizationApi from '@/api/organization';
 import { renderScreen, signInWith } from '@/test/harness';
+import { changeLanguage } from '@/i18n';
 import { InventoryCodeFormatBuilder } from '@/components/organization/InventoryCodeFormatBuilder';
 import { InventoryCodeFormatPage } from './InventoryCodeFormatPage';
 
@@ -38,7 +39,7 @@ const TOKENS = [
     maxLength: 8,
     alwaysAvailable: false,
   }),
-  token('NUMBER_COMPOSITION', 'Number composition', {
+  token('NUMBER_COMPOSITION', 'Unit number', {
     sample: '001-02-03',
     maxLength: 16,
     alwaysAvailable: false,
@@ -229,10 +230,10 @@ describe('editing', () => {
     );
 
     renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
-    await findChip('Number composition');
+    await findChip('Unit number');
 
     await userEvent.click(
-      within(chipFor('Number composition')).getByRole('button', { name: 'Remove' })
+      within(chipFor('Unit number')).getByRole('button', { name: 'Remove' })
     );
 
     expect(await screen.findByText(/only thing separating one unit from another/i)).toBeInTheDocument();
@@ -254,7 +255,7 @@ describe('editing', () => {
     );
 
     renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
-    await findChip('Number composition');
+    await findChip('Unit number');
 
     await userEvent.click(
       within(chipFor('Institution code')).getByRole('button', { name: 'Move later' })
@@ -273,7 +274,7 @@ describe('editing', () => {
     );
 
     renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
-    await findChip('Number composition');
+    await findChip('Unit number');
 
     await userEvent.selectOptions(screen.getByLabelText('Add a value'), 'SEQUENCE');
 
@@ -454,5 +455,71 @@ describe('the scoped entry point', () => {
 
     expect(await screen.findByText(/no institution to configure/i)).toBeInTheDocument();
     expect(organizationApi.institutionsApi.inventoryCodeFormat).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * P4 (`IMPLEMENTATION_PLAN.md` §64.4): who provides each part — the Unit number
+ * typed by the registrar, the rest filled in or assigned — with an example.
+ */
+describe('explaining who provides each part (P4)', () => {
+  const unitNumberFormat = () =>
+    config({
+      format: '{NUMBER_COMPOSITION}/{CLASSIFICATION_CODE}/{REGISTRATION_YEAR}',
+      isDefault: false,
+    });
+
+  it('marks the unit number as typed and every other part as filled in', async () => {
+    vi.spyOn(organizationApi.institutionsApi, 'inventoryCodeFormat').mockResolvedValue(
+      unitNumberFormat()
+    );
+    renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
+
+    const roles = within(await screen.findByTestId('inventory-code-roles'));
+    expect(roles.getByText('Who provides each part')).toBeInTheDocument();
+    expect(roles.getByText('Unit number')).toBeInTheDocument();
+    expect(roles.getByText('Typed by the person registering, for each unit')).toBeInTheDocument();
+    expect(
+      roles.getByText("Filled in automatically from the asset's classification")
+    ).toBeInTheDocument();
+    expect(
+      roles.getByText('Filled in automatically from the year the unit is registered')
+    ).toBeInTheDocument();
+    expect(roles.getByText(/never this format or its parts/)).toBeInTheDocument();
+  });
+
+  it('gives an example with the typed unit number inside the code', async () => {
+    vi.spyOn(organizationApi.institutionsApi, 'inventoryCodeFormat').mockResolvedValue(
+      unitNumberFormat()
+    );
+    renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
+
+    expect(await screen.findByTestId('inventory-code-example')).toHaveTextContent(
+      'The person registering types 1.6 and the inventory code becomes 1.6/202010500200/2026'
+    );
+  });
+
+  it('says nothing is typed when the format has no unit number', async () => {
+    renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
+    const roles = within(await screen.findByTestId('inventory-code-roles'));
+    expect(roles.getByText(/nothing is typed at registration/)).toBeInTheDocument();
+    expect(
+      roles.getByText('Assigned automatically at registration, counting up')
+    ).toBeInTheDocument();
+  });
+
+  it('names the parts in Indonesian', async () => {
+    changeLanguage('id');
+    vi.spyOn(organizationApi.institutionsApi, 'inventoryCodeFormat').mockResolvedValue(
+      unitNumberFormat()
+    );
+    renderScreen(<InventoryCodeFormatBuilder institutionId="inst-1" />);
+
+    await waitFor(() => chipFor('Nomor unit'));
+    const roles = within(screen.getByTestId('inventory-code-roles'));
+    expect(roles.getByText('Siapa mengisi setiap bagian')).toBeInTheDocument();
+    expect(
+      roles.getByText('Diketik oleh petugas yang mendaftarkan, untuk setiap unit')
+    ).toBeInTheDocument();
   });
 });

@@ -23,6 +23,17 @@ const InventoryCodeFormatPage = lazy(() =>
     default: m.InventoryCodeFormatPage,
   }))
 );
+const MyRoomsPage = lazy(() =>
+  import('@/pages/unitReports/MyRoomsPage').then((m) => ({ default: m.MyRoomsPage }))
+);
+const UnitReportsPage = lazy(() =>
+  import('@/pages/unitReports/UnitReportsPage').then((m) => ({ default: m.UnitReportsPage }))
+);
+const TeacherStorageRoomPage = lazy(() =>
+  import('@/pages/organization/TeacherStorageRoomPage').then((m) => ({
+    default: m.TeacherStorageRoomPage,
+  }))
+);
 const DepartmentsPage = lazy(() =>
   import('@/pages/organization/DepartmentsPage').then((m) => ({ default: m.DepartmentsPage }))
 );
@@ -43,6 +54,25 @@ const RolesPage = lazy(() =>
 const RoleDetailPage = lazy(() =>
   import('@/pages/organization/RoleDetailPage').then((m) => ({ default: m.RoleDetailPage }))
 );
+const WorkflowConfigurationPage = lazy(() =>
+  import('@/pages/organization/workflows/WorkflowConfigurationPage').then((m) => ({
+    default: m.WorkflowConfigurationPage,
+  }))
+);
+const WorkflowEditorPage = lazy(() =>
+  import('@/pages/organization/workflows/WorkflowEditorPage').then((m) => ({
+    default: m.WorkflowEditorPage,
+  }))
+);
+const RequestsPage = lazy(() =>
+  import('@/pages/requests/RequestsPage').then((m) => ({ default: m.RequestsPage }))
+);
+const RequestFormPage = lazy(() =>
+  import('@/pages/requests/RequestFormPage').then((m) => ({ default: m.RequestFormPage }))
+);
+const RequestDetailPage = lazy(() =>
+  import('@/pages/requests/RequestDetailPage').then((m) => ({ default: m.RequestDetailPage }))
+);
 const AssetsPage = lazy(() =>
   import('@/pages/assets/AssetsPage').then((m) => ({ default: m.AssetsPage }))
 );
@@ -57,6 +87,14 @@ const AssetUnitsPage = lazy(() =>
 );
 const AssetUnitDetailPage = lazy(() =>
   import('@/pages/assets/AssetUnitDetailPage').then((m) => ({ default: m.AssetUnitDetailPage }))
+);
+const ConsumablesPage = lazy(() =>
+  import('@/pages/consumables/ConsumablesPage').then((m) => ({ default: m.ConsumablesPage }))
+);
+const ConsumableDetailPage = lazy(() =>
+  import('@/pages/consumables/ConsumableDetailPage').then((m) => ({
+    default: m.ConsumableDetailPage,
+  }))
 );
 const UnitLabelsPage = lazy(() =>
   import('@/pages/assets/UnitLabelsPage').then((m) => ({ default: m.UnitLabelsPage }))
@@ -248,12 +286,56 @@ export const routeDefinitions = [
        * the only unit list not nested under a parent the caller may be unable to
        * open, which is what makes it a usable discovery surface for that tier.
        */
-      screenRoute({
+      // §73: `labels?ids=…` — the labels of units selected in that list, the
+      // same sheet as a single unit's or an asset's (`UnitLabelsPage`).
+      {
         path: 'asset-units',
-        permission: 'asset-unit:read',
-        element: <AssetUnitsPage />,
-        crumb: 'crumbs.assetUnits',
-      }),
+        handle: { crumb: 'crumbs.assetUnits' },
+        children: [
+          screenRoute({ index: true, permission: 'asset-unit:read', element: <AssetUnitsPage /> }),
+          screenRoute({
+            path: 'labels',
+            permission: 'asset-unit:read',
+            element: <UnitLabelsPage />,
+            crumb: 'crumbs.labels',
+          }),
+        ],
+      },
+
+      // §73 — consumables: quantity-based stock, not Assets.
+      {
+        path: 'consumables',
+        handle: { crumb: 'crumbs.consumables' },
+        children: [
+          screenRoute({ index: true, permission: 'consumable:read', element: <ConsumablesPage /> }),
+          screenRoute({
+            path: ':id',
+            permission: 'consumable:read',
+            element: <ConsumableDetailPage />,
+            crumb: (params) => params.id,
+          }),
+        ],
+      },
+
+      // REQ-REQUEST-025 — Room PIC reports: the reviewer's queue, and the
+      // reporter's rooms. Each behind its own code; neither is a read of units.
+      {
+        path: 'unit-reports',
+        handle: { crumb: 'crumbs.unitReports' },
+        children: [
+          screenRoute({
+            index: true,
+            permission: 'asset-unit-report:review',
+            element: <UnitReportsPage />,
+          }),
+          screenRoute({
+            path: 'my-rooms',
+            permission: 'asset-unit-report:create',
+            element: <MyRoomsPage />,
+            crumb: 'crumbs.myRooms',
+          }),
+        ],
+      },
 
       // Asset core — §5.3.
       {
@@ -509,6 +591,13 @@ export const routeDefinitions = [
             element: <InventoryCodeFormatPage />,
             crumb: 'crumbs.inventoryCodeFormat',
           }),
+          // REQ-REQUEST-023 — a sibling for the same reason as the code format.
+          screenRoute({
+            path: 'teacher-storage-room',
+            permission: 'teacher-storage-room:read',
+            element: <TeacherStorageRoomPage />,
+            crumb: 'crumbs.teacherStorageRoom',
+          }),
           {
             path: 'departments',
             handle: { crumb: 'crumbs.departments' },
@@ -552,6 +641,79 @@ export const routeDefinitions = [
               }),
             ],
           },
+          /**
+           * Workflow configuration — Phase 36 (`CR-014`), `07-ui.md` §5.10.
+           * Both screens are gated on `workflow-definition:read`; the editing
+           * actions inside are gated on their own codes.
+           */
+          {
+            path: 'workflows',
+            handle: { crumb: 'crumbs.workflows' },
+            children: [
+              screenRoute({
+                index: true,
+                permission: 'workflow-definition:read',
+                element: <WorkflowConfigurationPage />,
+              }),
+              screenRoute({
+                path: ':id',
+                permission: 'workflow-definition:read',
+                element: <WorkflowEditorPage />,
+                crumb: (params) => params.id,
+              }),
+            ],
+          },
+        ],
+      },
+
+      /**
+       * Requests — Phase 37 (`CR-014`), `07-ui.md` §5.10: drafting only.
+       * `all` is reachable with `request:read`; the nav entry for it is gated
+       * on `request:oversee`, and the server decides what it lists.
+       */
+      {
+        path: 'requests',
+        handle: { crumb: 'crumbs.requests' },
+        children: [
+          screenRoute({ index: true, permission: 'request:read', element: <RequestsPage /> }),
+          screenRoute({
+            path: 'all',
+            permission: 'request:read',
+            element: <RequestsPage scope="all" />,
+            crumb: 'crumbs.allRequests',
+          }),
+          // Phase 38 (decision F6).
+          screenRoute({
+            path: 'awaiting',
+            permission: 'request:read',
+            element: <RequestsPage scope="awaiting" />,
+            crumb: 'crumbs.awaitingRequests',
+          }),
+          // P6 (§64.6): involved requests with an unseen update.
+          screenRoute({
+            path: 'updates',
+            permission: 'request:read',
+            element: <RequestsPage scope="updates" />,
+            crumb: 'crumbs.updatedRequests',
+          }),
+          screenRoute({
+            path: 'new',
+            permission: 'request:create',
+            element: <RequestFormPage />,
+            crumb: 'crumbs.new',
+          }),
+          screenRoute({
+            path: ':id',
+            permission: 'request:read',
+            element: <RequestDetailPage />,
+            crumb: (params) => params.id,
+          }),
+          screenRoute({
+            path: ':id/edit',
+            permission: 'request:update',
+            element: <RequestFormPage />,
+            crumb: 'crumbs.edit',
+          }),
         ],
       },
 

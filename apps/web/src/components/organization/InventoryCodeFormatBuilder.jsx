@@ -110,6 +110,18 @@ const isToken = (segment, id) => segment.type === 'token' && segment.value === i
 const distinguishing = (segments) =>
   segments.filter((segment) => DISTINGUISHING.some((id) => isToken(segment, id)));
 
+/**
+ * A part's name in the reader's language — P4 (`IMPLEMENTATION_PLAN.md` §64.4).
+ * The registration screens use the same names (`units.unitNumber.parts`), so an
+ * administrator and a registrar call the typed part the same thing: the Unit
+ * number. The server's name is the fallback for a token this client predates.
+ */
+const tokenLabel = (t, token, id) =>
+  t(`units.unitNumber.parts.${id}`, { defaultValue: token?.name ?? id });
+
+/** What the example shows a registrar typing. Free-form, like the real thing. */
+const EXAMPLE_UNIT_NUMBER = '1.6';
+
 export function InventoryCodeFormatBuilder({ institutionId }) {
   const { t } = useTranslation();
   const query = useInventoryCodeFormat(institutionId);
@@ -280,7 +292,7 @@ export function InventoryCodeFormatBuilder({ institutionId }) {
               >
                 {segment.type === 'token' ? (
                   <span className="font-medium">
-                    {tokensById.get(segment.value)?.name ?? segment.value}
+                    {tokenLabel(t, tokensById.get(segment.value), segment.value)}
                   </span>
                 ) : (
                   <span className="font-mono text-muted-foreground">{segment.value}</span>
@@ -338,7 +350,7 @@ export function InventoryCodeFormatBuilder({ institutionId }) {
           {refused ? (
             <Alert variant="warning" size="sm" className="mt-2">
               {t('organization.inventoryCodeFormat.cannotRemoveLast', {
-                token: tokensById.get(refused)?.name ?? refused,
+                token: tokenLabel(t, tokensById.get(refused), refused),
               })}
             </Alert>
           ) : null}
@@ -367,7 +379,7 @@ export function InventoryCodeFormatBuilder({ institutionId }) {
                   .filter((token) => token.id !== SEQUENCE || !hasSequence)
                   .map((token) => (
                     <option key={token.id} value={token.id}>
-                      {token.name}
+                      {tokenLabel(t, token, token.id)}
                     </option>
                   ))}
               </NativeSelect>
@@ -408,11 +420,97 @@ export function InventoryCodeFormatBuilder({ institutionId }) {
           </p>
         </div>
 
+        {/*
+          --- Who provides each part — P4 (§64.4) ---------------------------
+          The one place the format's parts are explained in the terms a
+          registrar meets them: the Unit number is typed, per unit; everything
+          else is filled in or assigned. Registrars never see this format.
+        */}
+        <div className="rounded-md border border-border p-3" data-testid="inventory-code-roles">
+          <p className="mb-2 text-sm font-medium">
+            {t('organization.inventoryCodeFormat.howTitle')}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {segments
+              .filter((segment) => segment.type === 'token')
+              .map((segment, index) => {
+                const token = tokensById.get(segment.value);
+                const role =
+                  segment.value === COMPOSITION
+                    ? t('organization.inventoryCodeFormat.roleTyped')
+                    : segment.value === SEQUENCE
+                      ? t('organization.inventoryCodeFormat.roleAllocated')
+                      : t('organization.inventoryCodeFormat.roleGenerated', {
+                          source: t(`organization.inventoryCodeFormat.sources.${segment.value}`, {
+                            defaultValue: token?.source ?? segment.value,
+                          }),
+                        });
+                return (
+                  <li key={`${segment.value}-${index}`} className="flex flex-wrap gap-x-2">
+                    <span
+                      className={
+                        segment.value === COMPOSITION
+                          ? 'rounded bg-primary px-1 font-medium text-primary-foreground'
+                          : 'font-medium'
+                      }
+                    >
+                      {tokenLabel(t, token, segment.value)}
+                    </span>
+                    <span className="text-muted-foreground">{role}</span>
+                  </li>
+                );
+              })}
+          </ul>
+
+          {usesComposition ? (
+            <p className="mt-3 text-sm" data-testid="inventory-code-example">
+              <span className="text-muted-foreground">
+                {t('organization.inventoryCodeFormat.exampleLabel')}:{' '}
+                {t('organization.inventoryCodeFormat.exampleTyped')}{' '}
+              </span>
+              <span className="rounded bg-primary px-1 font-mono font-semibold text-primary-foreground">
+                {EXAMPLE_UNIT_NUMBER}
+              </span>{' '}
+              <span className="text-muted-foreground">
+                {t('organization.inventoryCodeFormat.exampleResult')}{' '}
+              </span>
+              <span className="font-mono">
+                {segments.map((segment, index) => {
+                  if (segment.type === 'literal') return <span key={index}>{segment.value}</span>;
+                  if (segment.value === COMPOSITION) {
+                    return (
+                      <span
+                        key={index}
+                        className="rounded bg-primary px-1 font-semibold text-primary-foreground"
+                      >
+                        {EXAMPLE_UNIT_NUMBER}
+                      </span>
+                    );
+                  }
+                  const token = tokensById.get(segment.value);
+                  return (
+                    <span key={index} className="text-muted-foreground">
+                      {token?.resolvable ? token.sample : `{${segment.value}}`}
+                    </span>
+                  );
+                })}
+              </span>
+            </p>
+          ) : (
+            <p className="mt-3 text-xs text-muted-foreground">
+              {t('organization.inventoryCodeFormat.noTyped')}
+            </p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t('organization.inventoryCodeFormat.registrarNote')}
+          </p>
+        </div>
+
         {/* --- Consequences, stated where the decision is made -------------- */}
         {unresolved.length > 0 ? (
           <Alert variant="warning" size="sm">
             {t('organization.inventoryCodeFormat.unresolved', {
-              tokens: unresolved.map((token) => token.name).join(', '),
+              tokens: unresolved.map((token) => tokenLabel(t, token, token.id)).join(', '),
             })}
           </Alert>
         ) : null}
@@ -420,7 +518,7 @@ export function InventoryCodeFormatBuilder({ institutionId }) {
         {optionalInUse.length > 0 ? (
           <Alert variant="warning" size="sm">
             {t('organization.inventoryCodeFormat.requiresValue', {
-              tokens: optionalInUse.map((token) => token.name).join(', '),
+              tokens: optionalInUse.map((token) => tokenLabel(t, token, token.id)).join(', '),
             })}
           </Alert>
         ) : null}

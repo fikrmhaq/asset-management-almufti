@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Download, Eye, FileImage, FileText, Trash2 } from 'lucide-react';
 
 import { assetsApi, attachmentsApi } from '@/api/assetCore';
@@ -52,7 +53,13 @@ export function rejectionReason(file) {
   return null;
 }
 
-export function AttachmentsPanel({ assetId, assetUnitId }) {
+/**
+ * `wholeAssetChange` (P3, §64.3): false for a Kajur / Toolman on an asset another
+ * department also has units of — a file on the asset itself is then neither
+ * added nor deleted here (the server refuses both); unit files are unaffected.
+ */
+export function AttachmentsPanel({ assetId, assetUnitId, wholeAssetChange = true }) {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const inputRef = useRef(null);
   const [pendingDelete, setPendingDelete] = useState(null);
@@ -141,7 +148,7 @@ export function AttachmentsPanel({ assetId, assetUnitId }) {
 
   return (
     <div className="space-y-4">
-      {canUpload ? (
+      {canUpload && (assetUnitId || wholeAssetChange) ? (
         <div className="flex items-center gap-3">
           <input
             ref={inputRef}
@@ -200,6 +207,15 @@ export function AttachmentsPanel({ assetId, assetUnitId }) {
                     <span className="block text-xs text-muted-foreground">
                       {formatSize(attachment.fileSize)} ·{' '}
                       {formatDate(attachment.createdAt?.slice(0, 10))}
+                      {/* REQ-REQUEST-020: evidence of what was registered. */}
+                      {attachment.purpose === 'REGISTRATION_PHOTO' ? (
+                        <>
+                          {' · '}
+                          <span data-testid={`attachment-registration-photo-${attachment.id}`}>
+                            {t('requests.registration.photos.badge')}
+                          </span>
+                        </>
+                      ) : null}
                     </span>
                   </span>
                 </span>
@@ -224,14 +240,16 @@ export function AttachmentsPanel({ assetId, assetUnitId }) {
                     <Download className="h-4 w-4" aria-hidden="true" />
                   </Button>
                   <Can code="attachment:delete">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Delete ${attachment.fileName}`}
-                      onClick={() => setPendingDelete(attachment)}
-                    >
-                      <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    </Button>
+                    {!attachment.assetUnitId && !wholeAssetChange ? null : (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Delete ${attachment.fileName}`}
+                        onClick={() => setPendingDelete(attachment)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    )}
                   </Can>
                 </span>
               </li>

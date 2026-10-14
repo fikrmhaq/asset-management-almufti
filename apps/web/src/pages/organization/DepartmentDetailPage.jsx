@@ -14,6 +14,7 @@ import { ErrorState, LoadingState } from '@/components/ui/states';
 import { Field, FormErrorSummary } from '@/components/form/field';
 import { DetailPage, SectionCard } from '@/components/patterns/page';
 import { PicPanel } from '@/components/patterns/pic-panel';
+import { PositionAssignmentsPanel } from '@/components/organization/PositionAssignmentsPanel';
 import { departmentsApi } from '@/api/organization';
 import { departments } from './resources';
 
@@ -129,6 +130,17 @@ export function DepartmentDetailPage() {
         institutionId={department.institutionId}
         currentPic={department.currentPic}
         permissionPrefix="department-pic"
+      />
+
+      {/*
+        Phase 35 (`CR-014`). The school positions held for this department — a
+        separate section from the person in charge above, never merged with it:
+        a position grants nothing and never touches a PIC record (`BR-028`).
+      */}
+      <PositionAssignmentsPanel
+        mode="department"
+        departmentId={id}
+        institutionId={department.institutionId}
       />
 
       <ConfirmDialog

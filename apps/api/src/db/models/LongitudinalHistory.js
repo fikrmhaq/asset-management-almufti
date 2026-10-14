@@ -30,7 +30,12 @@ module.exports = (sequelize, DataTypes) =>
       id: { type: DataTypes.UUID, primaryKey: true, defaultValue: DataTypes.UUIDV4 },
       assetUnitId: { type: DataTypes.UUID, allowNull: false },
       description: { type: DataTypes.TEXT, allowNull: false },
-      condition: { type: DataTypes.ENUM(...CONDITIONS), allowNull: false },
+      /**
+       * Required on every row but a `SYSTEM` one — migration 064,
+       * REQ-REQUEST-024 (`chk_longitudinal_history_condition`). A receipt
+       * placement records where a unit is, not how it is.
+       */
+      condition: { type: DataTypes.ENUM(...CONDITIONS), allowNull: true },
       locationId: { type: DataTypes.UUID, allowNull: false },
       lifecycleState: { type: DataTypes.ENUM(...LIFECYCLE_STATES), allowNull: true },
       /**

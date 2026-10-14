@@ -12,7 +12,7 @@ const transactionService = require('../transactions/service');
 const { CONDITIONS, LIFECYCLE_STATES } = require('../../db/enums');
 const { listQuerySchema } = require('../../query/listQuery');
 const { asyncHandler } = require('../../http/asyncHandler');
-const { sendItem, sendList } = require('../../http/respond');
+const { sendItem, sendList, sendCollection } = require('../../http/respond');
 const { validate } = require('../../middleware/validate');
 const { requirePermission } = require('../../middleware/authorize');
 const { MAX_LENGTH, INVENTORY_CODE } = require('../../domain/inventoryCode');
@@ -35,6 +35,28 @@ const inventoryCode = z.string().trim().min(1, 'is required').max(MAX_LENGTH);
 const codeQuery = z.object({
   code: inventoryCode.regex(INVENTORY_CODE, 'is not a valid inventory code'),
 });
+
+/** Batch labels (§73): `ids=a,b,c` — 1 to 200 distinct unit ids, in print order. */
+const MAX_BATCH_LABELS = 200;
+const labelsQuery = z
+  .object({
+    ids: z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean)
+      )
+      .pipe(
+        z
+          .array(z.string().uuid('must be a list of unit ids'))
+          .min(1, 'select at least one unit')
+          .max(MAX_BATCH_LABELS, `at most ${MAX_BATCH_LABELS} labels at once`)
+          .refine((ids) => new Set(ids).size === ids.length, 'name each unit once')
+      ),
+  })
+  .strict();
 
 /**
  * The PATH form, kept permanently for the labels already printed onto it.
@@ -99,6 +121,11 @@ const listUnits = listQuerySchema({
   condition: z.enum(CONDITIONS).optional(),
   locationId: uuid.optional(),
   q: z.string().trim().min(1).optional(),
+  // REQ-REQUEST-024: received and not placed (`domain/receiptPlacement.js`).
+  needsPlacement: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 
 function assetUnitsRouter() {
@@ -153,6 +180,21 @@ function assetUnitsRouter() {
     validate({ params: codeParams }),
     asyncHandler(async (req, res) => {
       sendItem(res, await service.detailByCode(req.params.inventoryCode, req.principal));
+    })
+  );
+
+  /**
+   * Labels for SELECTED units — batch printing (§73). The same label each unit
+   * gets on its own (`GET /:id/label`): the same builder, the same QR address.
+   * Every id goes through the same record scope; any unit out of reach is `404`
+   * for the whole batch. Declared before `/:id`.
+   */
+  router.get(
+    '/labels',
+    requirePermission('asset-unit:read'),
+    validate({ query: labelsQuery }),
+    asyncHandler(async (req, res) => {
+      sendCollection(res, await service.labelsFor(req.query.ids, req.principal));
     })
   );
 

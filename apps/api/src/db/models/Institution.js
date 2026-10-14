@@ -19,6 +19,13 @@ module.exports = (sequelize, DataTypes) =>
        * institutions that never chose one.
        */
       inventoryCodeFormat: { type: DataTypes.STRING(200), allowNull: true },
+      /**
+       * The Teacher Storage Room — migration 063, REQ-REQUEST-023: one Location
+       * of THIS institution (composite key), the default intended location for
+       * a teacher who is no Location PIC. NULL means not configured. A default
+       * only: it moves no unit and is never copied into a request.
+       */
+      teacherStorageLocationId: { type: DataTypes.UUID, allowNull: true },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     },
     { schema: 'public', tableName: 'institutions' }

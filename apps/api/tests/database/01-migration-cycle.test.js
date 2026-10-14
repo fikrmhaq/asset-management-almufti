@@ -38,15 +38,17 @@ describe('migration cycle', () => {
   });
 
   it('builds the complete schema from an empty database', () => {
-    expect(afterFirstMigrate).toEqual({ tables: 36, enums: 8, schemas: 2 });
+    // 50 since migration 066 (REQ-REQUEST-025) added `asset_unit_reports`;
+    // 52 since migration 067 (§73) added consumables and their movements.
+    expect(afterFirstMigrate).toEqual({ tables: 52, enums: 8, schemas: 2 });
   });
 
   it('applies every migration exactly once', async () => {
     const rows = await query('SELECT name FROM "SequelizeMeta" ORDER BY name', [], DB);
 
-    expect(rows).toHaveLength(49);
+    expect(rows).toHaveLength(68);
     expect(rows[0].name).toContain('000-create-schemas-and-extensions');
-    expect(rows.at(-1).name).toContain('048-alter-longitudinal-history-entry-type');
+    expect(rows.at(-1).name).toContain('067-create-consumables');
   });
 
   it('rolls back to an empty database, leaving no tables, enums or schemas', () => {
@@ -57,9 +59,9 @@ describe('migration cycle', () => {
     expect(secondSnapshot).toBe(firstSnapshot);
   });
 
-  it('tracks all 49 migrations again after re-migration', async () => {
+  it('tracks all 68 migrations again after re-migration', async () => {
     const [{ count }] = await query('SELECT count(*)::int AS count FROM "SequelizeMeta"', [], DB);
 
-    expect(count).toBe(49);
+    expect(count).toBe(68);
   });
 });

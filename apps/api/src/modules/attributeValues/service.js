@@ -13,9 +13,14 @@
 const { getModels } = require('../../db/models');
 const { getSequelize } = require('../../db/sequelize');
 const { withTransaction } = require('../../db/withTransaction');
-const { buildAttributeValues, serializeValue } = require('../../domain/attributeRules');
+const {
+  ALL_VALUE_COLUMNS,
+  buildAttributeValues,
+  serializeValue,
+} = require('../../domain/attributeRules');
 const { ForbiddenError } = require('../../errors');
 const { organizationScope } = require('../../auth/principal');
+const { assertAssetWideChange } = require('../../domain/scope');
 const assetService = require('../assets/service');
 const assetUnitService = require('../assetUnits/service');
 
@@ -87,6 +92,8 @@ async function list(targetName, ownerId, principal, { models = getModels() } = {
     models[target.model].findAll({ where: { [target.ownerKey]: ownerId } }),
     models.AttributeDefinition.findAll({
       where: { classificationId, scope: target.scope, isActive: true },
+      // REQ-REQUEST-021: the unit's name, shown beside a number.
+      include: [{ association: 'measurementUnit', attributes: ['id', 'name'] }],
       order: [
         ['sortOrder', 'ASC'],
         ['name', 'ASC'],
@@ -98,18 +105,23 @@ async function list(targetName, ownerId, principal, { models = getModels() } = {
 
   // Every applicable definition is returned, valued or not, so the form can be
   // rendered from this one response without a second call for the schema.
-  return definitions.map((definition) => {
-    const row = valuesByDefinition.get(definition.id);
-    return row
-      ? serializeValue(row, definition)
-      : {
-          attributeDefinitionId: definition.id,
-          name: definition.name,
-          attributeType: definition.attributeType,
-          scope: definition.scope,
-          measurementUnitId: definition.measurementUnitId ?? null,
-          value: null,
-        };
+  return definitions.map((definition) =>
+    serializeValue(valuesByDefinition.get(definition.id) ?? null, definition)
+  );
+}
+
+/**
+ * Whether a stored row already holds the columns about to be written. NUMERIC
+ * arrives as a string ("12.5000"), so numbers compare as numbers; the rest as
+ * text (DATE is already `YYYY-MM-DD`).
+ */
+function sameValue(row, columns) {
+  return ALL_VALUE_COLUMNS.every((name) => {
+    const stored = row[name] ?? null;
+    const next = columns[name] ?? null;
+    if (stored === null || next === null) return stored === next;
+    if (name === 'valueNumeric') return Number(stored) === Number(next);
+    return String(stored) === String(next);
   });
 }
 
@@ -125,7 +137,9 @@ async function replace(targetName, ownerId, values, principal, options = {}) {
   const sequelize = options.sequelize ?? getSequelize();
   const target = TARGETS[targetName];
 
-  const { classificationId } = await resolveOwner(target, ownerId, principal, models);
+  const { owner, classificationId } = await resolveOwner(target, ownerId, principal, models);
+  // P3 (§64.3): an asset's own values concern every department's units.
+  if (target.scope === 'ASSET') await assertAssetWideChange(principal, owner);
 
   const rows = await buildAttributeValues(
     { classificationId, scope: target.scope, values },
@@ -139,21 +153,39 @@ async function replace(targetName, ownerId, values, principal, options = {}) {
     })
   ).map((definition) => definition.id);
 
+  /**
+   * One row at a time, so every write passes the audit hooks (REQ-AUDIT-001/002,
+   * REQ-REQUEST-021). The old bulk `destroy` + `bulkCreate` fired only bulk hooks,
+   * which nothing listens to — no value change was ever audited. Diffed, so a
+   * new value is a CREATE, a changed one an UPDATE with before and after, a
+   * cleared one a DELETE with what it held, and an unchanged one nothing at all.
+   *
+   * Only the editable set is replaced. A value whose definition was deactivated
+   * after it was recorded is left alone rather than destroyed — deactivation is
+   * not deletion (REQ-SYS-005, BR-005).
+   */
   await withTransaction(
     async (transaction) => {
-      // Only the editable set is replaced. A value whose definition was
-      // deactivated after it was recorded is left alone rather than destroyed —
-      // deactivation is not deletion (REQ-SYS-005, BR-005).
-      await models[target.model].destroy({
+      const existing = await models[target.model].findAll({
         where: { [target.ownerKey]: ownerId, attributeDefinitionId: editableIds },
         transaction,
       });
+      const existingByDefinition = new Map(existing.map((row) => [row.attributeDefinitionId, row]));
+      const submitted = new Map(rows.map((row) => [row.attributeDefinitionId, row]));
 
-      if (rows.length > 0) {
-        await models[target.model].bulkCreate(
-          rows.map((row) => ({ ...row, [target.ownerKey]: ownerId })),
-          { transaction }
-        );
+      for (const row of existing) {
+        if (!submitted.has(row.attributeDefinitionId)) await row.destroy({ transaction });
+      }
+      for (const [definitionId, { attributeDefinitionId, ...columns }] of submitted) {
+        const current = existingByDefinition.get(definitionId);
+        if (!current) {
+          await models[target.model].create(
+            { ...columns, attributeDefinitionId, [target.ownerKey]: ownerId },
+            { transaction }
+          );
+        } else if (!sameValue(current, columns)) {
+          await current.update(columns, { transaction });
+        }
       }
     },
     { sequelize }

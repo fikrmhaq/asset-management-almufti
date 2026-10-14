@@ -10,6 +10,7 @@ const unitService = require('../assetUnits/service');
 const attributeValueService = require('../attributeValues/service');
 const attachmentService = require('../attachments/service');
 const { CONDITIONS, LIFECYCLE_STATES } = require('../../db/enums');
+const { ATTACHMENT_PURPOSES } = require('../../domain/attachmentPurposes');
 const { listQuerySchema } = require('../../query/listQuery');
 const { asyncHandler } = require('../../http/asyncHandler');
 const { sendItem, sendCreated, sendList, sendCollection } = require('../../http/respond');
@@ -85,6 +86,8 @@ const createUnit = z
     contractItemId: uuid.nullish(),
     departmentId: uuid.nullish(),
     numberComposition: numberComposition.nullish(),
+    // REQ-UNIT-012 (migration 056): the unit's own acquisition fact.
+    fundingSourceId: z.number().int().positive().nullish(),
   })
   .strict();
 
@@ -101,10 +104,29 @@ const replaceAttributeValues = z
   .object({ values: z.record(z.string().uuid(), z.unknown()) })
   .strict();
 
-const uploadAttachment = z.object({ assetUnitId: uuid.optional() }).strict();
+const uploadAttachment = z
+  .object({
+    assetUnitId: uuid.optional(),
+    // REQ-REQUEST-020: omitted for an ordinary attachment.
+    purpose: z
+      .enum(ATTACHMENT_PURPOSES, {
+        errorMap: () => ({ message: `must be one of: ${ATTACHMENT_PURPOSES.join(', ')}` }),
+      })
+      .optional(),
+  })
+  .strict();
 
 function assetsRouter() {
   const router = Router();
+
+  // Before `/:id`. P3 (§64.3): the caller's own Asset reach, for the screens.
+  router.get(
+    '/scope',
+    requirePermission('asset:read'),
+    asyncHandler(async (req, res) => {
+      sendItem(res, await service.scope(req.principal));
+    })
+  );
 
   router.get(
     '/',

@@ -182,6 +182,42 @@ describe('permission catalog', () => {
     // nodes. The permission exists; `BR-016` is what keeps government rows safe.
     'classification:create',
     'classification:promote',
+    // Phase 35 (`CR-014`): school positions.
+    'school-position:read',
+    'position-assignment:read',
+    'position-assignment:create',
+    'position-assignment:end',
+    // Phase 36 (`CR-014`): workflow definitions.
+    'workflow-definition:read',
+    'workflow-definition:create',
+    'workflow-definition:update',
+    'workflow-definition:publish',
+    // Phase 37 (`CR-014`): request drafting.
+    'request:read',
+    'request:create',
+    'request:update',
+    'request:oversee',
+    'request-item:create',
+    'request-item:update',
+    'request-item:delete',
+    // Phase 38.
+    'request:submit',
+    'request:cancel',
+    'request-step:decide',
+    'request-step:complete',
+    // Phase 39.
+    'request-document:read',
+    'request-document:create',
+    'request-document:delete',
+    // Phase 40.
+    'request-item:register',
+    'request-item-unit:read',
+    'request-item-unit:create',
+    'request-item-unit:delete',
+    // Phase 41.
+    'request:receive',
+    'request:close',
+    'request-receipt:reverse',
   ])('includes the documented code %s', (code) => {
     expect(isKnownPermission(code)).toBe(true);
   });
@@ -248,6 +284,9 @@ describe('permission catalog', () => {
         'Asset Core',
         'Procurement',
         'Operations',
+        // Phase 37 (`CR-014`): its own group, as Requests is its own
+        // navigation group in `07-ui.md` §2.
+        'Requests',
         'Reports',
         'Audit',
       ])
@@ -318,10 +357,46 @@ describe('principal', () => {
   // current PIC departments, so a PIC-scoped role needs no `department:read`.
   it('never exposes a password hash in the public profile', async () => {
     const profile = await toPublicProfile(scoped, {
-      models: { Department: { findAll: async () => [] } },
+      models: {
+        Department: { findAll: async () => [] },
+        PositionAssignment: { findAll: async () => [] },
+      },
     });
 
     expect(JSON.stringify(profile)).not.toMatch(/password/i);
+    expect(profile.permissions).toEqual(['asset:create', 'asset:read']);
+  });
+
+  // Phase 35 (`CR-014`): current school positions ride on the profile, beside
+  // the permissions they never alter (`BR-028`).
+  it('reports current school positions without changing the permissions', async () => {
+    const profile = await toPublicProfile(scoped, {
+      models: {
+        Department: { findAll: async () => [] },
+        PositionAssignment: {
+          findAll: async ({ where }) => {
+            expect(where).toMatchObject({ isCurrent: true });
+            return [
+              {
+                id: 'a1',
+                positionCode: 'JURUSAN_TEACHER',
+                institutionId: 'i1',
+                department: { id: 'd1', code: 'TKJ', name: 'Teknik Komputer' },
+              },
+            ];
+          },
+        },
+      },
+    });
+
+    expect(profile.positionAssignments).toEqual([
+      {
+        id: 'a1',
+        positionCode: 'JURUSAN_TEACHER',
+        institutionId: 'i1',
+        department: { id: 'd1', code: 'TKJ', name: 'Teknik Komputer' },
+      },
+    ]);
     expect(profile.permissions).toEqual(['asset:create', 'asset:read']);
   });
 });

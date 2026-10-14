@@ -16,6 +16,7 @@ const { asyncHandler } = require('../../http/asyncHandler');
 const { sendItem, sendCreated, sendList, sendCollection } = require('../../http/respond');
 const { validate } = require('../../middleware/validate');
 const { requirePermission } = require('../../middleware/authorize');
+const { departmentPositionRoutes } = require('../positionAssignments/routes');
 
 function departmentsRouter() {
   const router = Router();
@@ -109,6 +110,10 @@ function departmentsRouter() {
       sendItem(res, await service.clearPic(req.params.id, req.principal));
     })
   );
+
+  // School positions held for this department — Phase 35 (`CR-014`). A separate
+  // concept from the person in charge above; never merged with it (`BR-028`).
+  departmentPositionRoutes(router);
 
   return router;
 }

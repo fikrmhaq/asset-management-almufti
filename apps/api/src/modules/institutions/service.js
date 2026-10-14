@@ -11,7 +11,7 @@
 const { Op } = require('sequelize');
 
 const { getModels } = require('../../db/models');
-const { NotFoundError, ConflictError } = require('../../errors');
+const { NotFoundError, ConflictError, ValidationError } = require('../../errors');
 const { toFindOptions, paginate } = require('../../query/listQuery');
 const { activeStatus, containsAny } = require('../../query/filtering');
 const { assertCanAccess } = require('../../domain/scope');
@@ -234,6 +234,56 @@ async function setFormat(id, body, principal, options = {}) {
   return serializeFormat(institution, { models });
 }
 
+// --- Teacher Storage Room — REQ-REQUEST-023, migration 063 ------------------
+
+async function serializeTeacherStorageRoom(institution, { models = getModels() } = {}) {
+  const location = institution.teacherStorageLocationId
+    ? await models.Location.findByPk(institution.teacherStorageLocationId, {
+        attributes: ['id', 'name', 'isActive'],
+      })
+    : null;
+  // `isActive` is shown, not hidden: a deactivated room stays configured but is
+  // offered to nobody (`requests.guidance`), and the setting should say so.
+  return {
+    location: location
+      ? { id: location.id, name: location.name, isActive: location.isActive }
+      : null,
+  };
+}
+
+async function getTeacherStorageRoom(id, principal, options = {}) {
+  const models = options.models ?? getModels();
+  return serializeTeacherStorageRoom(await getScoped(id, principal, { models }), { models });
+}
+
+/**
+ * Names (or, with `null`, clears) the room: an active Location of THIS
+ * institution — the same rule as a request destination (`assertDestination`);
+ * the composite key `fk_institutions_teacher_storage` holds the institution part
+ * in the schema too. Only future defaults change: requests, receipt snapshots
+ * and unit locations never read it.
+ */
+async function setTeacherStorageRoom(id, body, principal, options = {}) {
+  const models = options.models ?? getModels();
+  const institution = await getScoped(id, principal, { models });
+
+  if (body.locationId !== null) {
+    const location = await models.Location.findByPk(body.locationId);
+    const refuse = (issue) =>
+      new ValidationError('That location cannot be the Teacher Storage Room', [
+        { field: 'locationId', issue },
+      ]);
+    if (!location || location.institutionId !== institution.id) {
+      throw refuse('must reference an existing location of this institution (BR-007)');
+    }
+    if (!location.isActive) throw refuse('must not reference a deactivated location');
+  }
+
+  await institution.update({ teacherStorageLocationId: body.locationId });
+
+  return serializeTeacherStorageRoom(institution, { models });
+}
+
 module.exports = {
   list,
   detail,
@@ -241,6 +291,8 @@ module.exports = {
   update,
   getFormat,
   setFormat,
+  getTeacherStorageRoom,
+  setTeacherStorageRoom,
   deactivate: (id, options) => setActive(id, false, options),
   reactivate: (id, options) => setActive(id, true, options),
   serialize,

@@ -19,6 +19,15 @@ import {
   Tags,
   Truck,
   Users,
+  Warehouse,
+  DoorOpen,
+  PackageOpen,
+  Flag,
+  Workflow,
+  ClipboardCheck,
+  Files,
+  Inbox,
+  BellDot,
 } from 'lucide-react';
 
 import { REPORT_PERMISSIONS } from '@/pages/reports/registry';
@@ -89,6 +98,22 @@ export const NAVIGATION = Object.freeze([
         permission: 'asset-unit:read',
         icon: Boxes,
       },
+      /**
+       * REQ-REQUEST-025. A Room PIC files reports from their rooms; a reviewer
+       * works the queue, opened on what is waiting.
+       */
+      {
+        labelKey: 'nav.items.myRooms',
+        to: '/unit-reports/my-rooms',
+        permission: 'asset-unit-report:create',
+        icon: DoorOpen,
+      },
+      {
+        labelKey: 'nav.items.unitReports',
+        to: '/unit-reports?status=PENDING',
+        permission: 'asset-unit-report:review',
+        icon: Flag,
+      },
       {
         labelKey: 'nav.items.locations',
         to: '/locations',
@@ -143,6 +168,13 @@ export const NAVIGATION = Object.freeze([
         permission: 'transaction:read',
         icon: Receipt,
       },
+      // §73: quantity-based stock, issued against requests.
+      {
+        labelKey: 'nav.items.consumables',
+        to: '/consumables',
+        permission: 'consumable:read',
+        icon: PackageOpen,
+      },
     ],
   },
   {
@@ -168,6 +200,13 @@ export const NAVIGATION = Object.freeze([
         permission: 'inventory-code-format:read',
         icon: Hash,
       },
+      // REQ-REQUEST-023 — gated on its own permission, as above.
+      {
+        labelKey: 'nav.items.teacherStorageRoom',
+        to: '/organization/teacher-storage-room',
+        permission: 'teacher-storage-room:read',
+        icon: Warehouse,
+      },
       {
         labelKey: 'nav.items.departments',
         to: '/organization/departments',
@@ -186,6 +225,17 @@ export const NAVIGATION = Object.freeze([
         permission: 'role:read',
         icon: ShieldCheck,
       },
+      /**
+       * Phase 36 (`CR-014`). Not shown to a PIC-scoped user: no
+       * `workflow-definition:*` code is in the `CR-004` ceiling, so the session
+       * never carries it.
+       */
+      {
+        labelKey: 'nav.items.workflows',
+        to: '/organization/workflows',
+        permission: 'workflow-definition:read',
+        icon: Workflow,
+      },
       {
         labelKey: 'nav.items.attributeDefinitions',
         to: '/reference/attribute-definitions',
@@ -197,6 +247,50 @@ export const NAVIGATION = Object.freeze([
         to: '/reference/lookups',
         permission: 'measurement-unit:read',
         icon: Library,
+      },
+    ],
+  },
+  /**
+   * Requests — Phase 37 (`CR-014`), `07-ui.md` §5.10. Hidden from a PIC-scoped
+   * user: no request code is in the `CR-004` ceiling. "Awaiting my action"
+   * arrives with workflow execution in Phase 38.
+   *
+   * "All requests" is gated on `request:oversee`, and shows other users'
+   * requests only once submitted — a DRAFT stays private (decision E1).
+   */
+  {
+    labelKey: 'nav.groups.requests',
+    icon: ClipboardCheck,
+    items: [
+      {
+        labelKey: 'nav.items.myRequests',
+        to: '/requests',
+        permission: 'request:read',
+        end: true,
+        icon: Inbox,
+      },
+      // Phase 38: the steps the caller can act on now (decision F6).
+      {
+        labelKey: 'nav.items.awaitingRequests',
+        to: '/requests/awaiting',
+        permission: 'request:read',
+        // P5 (§64.5): "Needs my action (N)" — the count of that same list.
+        badge: 'actionsNeeded',
+        icon: ClipboardCheck,
+      },
+      // P6 (§64.6): "Updates • 2" — involved requests changed since last seen.
+      {
+        labelKey: 'nav.items.updatedRequests',
+        to: '/requests/updates',
+        permission: 'request:read',
+        badge: 'updates',
+        icon: BellDot,
+      },
+      {
+        labelKey: 'nav.items.allRequests',
+        to: '/requests/all',
+        permission: 'request:oversee',
+        icon: Files,
       },
     ],
   },

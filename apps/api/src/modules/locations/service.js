@@ -241,6 +241,22 @@ async function update(id, body, principal, options = {}) {
     body.institutionId !== undefined && body.institutionId !== location.institutionId;
 
   await withTransaction(async (transaction) => {
+    /**
+     * REQ-REQUEST-023: nor can it stay the Teacher Storage Room of the
+     * institution it is leaving — cleared first, on the same reasoning as the
+     * PIC, since `fk_institutions_teacher_storage` ties the room to its
+     * institution. Only that institution's future defaults change.
+     */
+    if (movingInstitution) {
+      const owners = await models.Institution.findAll({
+        where: { teacherStorageLocationId: id },
+        transaction,
+      });
+      for (const owner of owners) {
+        await owner.update({ teacherStorageLocationId: null }, { transaction });
+      }
+    }
+
     await location.update(body, { transaction });
 
     if (movingInstitution) {

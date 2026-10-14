@@ -24,6 +24,11 @@ export const institutionsApi = {
     api.get(`/institutions/${encodeURIComponent(id)}/inventory-code-format`),
   setInventoryCodeFormat: (id, format) =>
     api.put(`/institutions/${encodeURIComponent(id)}/inventory-code-format`, { format }),
+  // REQ-REQUEST-023: `teacher-storage-room:*`; `{ locationId: null }` clears it.
+  teacherStorageRoom: (id) =>
+    api.get(`/institutions/${encodeURIComponent(id)}/teacher-storage-room`),
+  setTeacherStorageRoom: (id, locationId) =>
+    api.put(`/institutions/${encodeURIComponent(id)}/teacher-storage-room`, { locationId }),
 };
 
 /** `:id` is the natural key (`VARCHAR(8)`), not a UUID — §3.2. */
@@ -47,6 +52,28 @@ export const usersApi = {
   listRoles: (id) => api.get(`/users/${id}/roles`),
   assignRole: (id, roleId) => api.post(`/users/${id}/roles`, { roleId }),
   removeRole: (id, roleId) => api.delete(`/users/${id}/roles/${roleId}`),
+};
+
+/**
+ * School positions — `06-api.md` §12.1, Phase 35 (`CR-014`).
+ *
+ * Its own permissions (`school-position:read`, `position-assignment:*`), and a
+ * separate concept from the department and location PIC above: a position
+ * grants nothing and never touches a PIC record (`BR-028`). `end` closes an
+ * assignment; nothing is deleted.
+ */
+export const positionsApi = {
+  list: () => api.get('/school-positions'),
+  forUser: (userId, params) =>
+    api.get(`/users/${encodeURIComponent(userId)}/position-assignments`, { params }),
+  forDepartment: (departmentId, params) =>
+    api.get(`/departments/${encodeURIComponent(departmentId)}/position-assignments`, {
+      params,
+    }),
+  assign: (userId, body) =>
+    api.post(`/users/${encodeURIComponent(userId)}/position-assignments`, body),
+  end: (assignmentId) =>
+    api.post(`/position-assignments/${encodeURIComponent(assignmentId)}/end`, {}),
 };
 
 export const rolesApi = {

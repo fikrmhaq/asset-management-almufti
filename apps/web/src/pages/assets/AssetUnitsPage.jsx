@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { Printer } from 'lucide-react';
 
 import { assetUnitsApi } from '@/api/assetCore';
 import { usePermission, usePicScope } from '@/auth/useSession';
 import { StatusBadge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DataTable } from '@/components/patterns/data-table';
 import { SearchFilter, SelectFilter, StatusFilter } from '@/components/patterns/filters';
 import { ListPage } from '@/components/patterns/page';
@@ -41,13 +45,25 @@ import { locations } from './resources';
  * a record the caller already holds — the link is rendered only for callers who
  * can actually open an asset, so a PIC sees the name as plain text rather than a
  * link into a page that would answer 403.
+ *
+ * BATCH LABELS (§73). Units can be selected — across pages and filters — and
+ * printed together on `/asset-units/labels?ids=…`: each the same label, and the
+ * same QR, it has on its own. Only units with an inventory code can be selected;
+ * the server re-checks every one against the caller's scope.
  */
+
+/** The most labels one sheet prints — the server's own limit. */
+const MAX_BATCH_LABELS = 200;
+
 export function AssetUnitsPage() {
   const { t } = useTranslation();
   const { params, setParams, setPage, setSort } = useListParams();
   const { isPicScoped, picDepartments } = usePicScope();
   const canReadAssets = usePermission('asset:read');
   const canReadLocations = usePermission('location:read');
+  const navigate = useNavigate();
+  // Selected for printing, in the order picked: id → inventory code.
+  const [selected, setSelected] = useState(() => new Map());
 
   const query = useQuery({
     queryKey: queryKeys.assetUnits.list(params),
@@ -79,7 +95,47 @@ export function AssetUnitsPage() {
     label: `${department.code} — ${department.name}`,
   }));
 
+  const rows = query.data?.data ?? [];
+  const labellable = rows.filter((row) => row.inventoryCode);
+  const allOnPage = labellable.length > 0 && labellable.every((row) => selected.has(row.id));
+  const toggle = (row, on) =>
+    setSelected((current) => {
+      const next = new Map(current);
+      if (on) next.set(row.id, row.inventoryCode);
+      else next.delete(row.id);
+      return next;
+    });
+  const togglePage = (on) =>
+    setSelected((current) => {
+      const next = new Map(current);
+      for (const row of labellable) {
+        if (on) next.set(row.id, row.inventoryCode);
+        else next.delete(row.id);
+      }
+      return next;
+    });
+  const tooMany = selected.size > MAX_BATCH_LABELS;
+
   const columns = [
+    {
+      id: 'select',
+      header: () => (
+        <Checkbox
+          aria-label={t('units.labels.selectPage')}
+          checked={allOnPage}
+          disabled={labellable.length === 0}
+          onChange={(event) => togglePage(event.target.checked)}
+        />
+      ),
+      cell: ({ row }) =>
+        row.original.inventoryCode ? (
+          <Checkbox
+            aria-label={t('units.labels.selectUnit', { code: row.original.inventoryCode })}
+            checked={selected.has(row.original.id)}
+            onChange={(event) => toggle(row.original, event.target.checked)}
+          />
+        ) : null,
+    },
     {
       accessorKey: 'inventoryCode',
       header: t('units.columns.unit'),
@@ -210,6 +266,16 @@ export function AssetUnitsPage() {
             width="w-44"
           />
 
+          {/* REQ-REQUEST-024: received, not placed — derived by the server. */}
+          <SelectFilter
+            id="filter-placement"
+            label={t('units.list.placement')}
+            value={params.needsPlacement ?? 'all'}
+            options={[{ value: 'true', label: t('units.list.needsPlacement') }]}
+            onChange={(needsPlacement) => setParams({ needsPlacement })}
+            width="w-44"
+          />
+
           <StatusFilter
             value={params.status ?? 'all'}
             onChange={(status) => setParams({ status })}
@@ -218,10 +284,38 @@ export function AssetUnitsPage() {
       }
       meta={query.data?.meta}
       onPageChange={setPage}
+      actions={
+        selected.size > 0 ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="label-selection">
+            <span className="text-sm text-muted-foreground">
+              {t('units.labels.selected', { count: selected.size })}
+            </span>
+            <Button variant="outline" size="sm" onClick={() => setSelected(new Map())}>
+              {t('units.labels.clear')}
+            </Button>
+            <Button
+              size="sm"
+              disabled={tooMany}
+              title={tooMany ? t('units.labels.tooMany', { max: MAX_BATCH_LABELS }) : undefined}
+              onClick={() =>
+                navigate(`/asset-units/labels?ids=${[...selected.keys()].join(',')}`)
+              }
+            >
+              <Printer className="h-4 w-4" aria-hidden="true" />
+              {t('units.labels.print', { count: selected.size })}
+            </Button>
+          </div>
+        ) : null
+      }
     >
+      {tooMany ? (
+        <p className="mb-3 text-sm text-warning-foreground">
+          {t('units.labels.tooMany', { max: MAX_BATCH_LABELS })}
+        </p>
+      ) : null}
       <DataTable
         columns={columns}
-        data={query.data?.data ?? []}
+        data={rows}
         isLoading={query.isLoading}
         error={query.error}
         onRetry={query.refetch}

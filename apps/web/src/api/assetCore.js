@@ -11,6 +11,8 @@ import { createResourceApi } from './resources';
 
 export const assetsApi = {
   ...createResourceApi('/assets'),
+  /** P3 (§64.3): the caller's own Asset reach — department-scoped or not, and which. */
+  scope: () => api.get('/assets/scope'),
   /** §5.1 — an asset's physical units. */
   listUnits: (id, params) => api.list(`/assets/${id}/units`, params),
   /** Every unit's label in one call — REQ-UNIT-010, a complete collection. */
@@ -21,6 +23,14 @@ export const assetsApi = {
   replaceAttributeValues: (id, values) => api.put(`/assets/${id}/attribute-values`, { values }),
   listAttachments: (id) => api.get(`/assets/${id}/attachments`),
   uploadAttachment: (id, formData) => api.upload(`/assets/${id}/attachments`, formData),
+};
+
+/**
+ * The inventory-code preview — P4 (`IMPLEMENTATION_PLAN.md` §64.4). Read-only on
+ * the server: it writes and reserves nothing, and registration still decides.
+ */
+export const inventoryCodesApi = {
+  preview: (body) => api.post('/inventory-codes/preview', body),
 };
 
 export const assetUnitsApi = {
@@ -61,6 +71,11 @@ export const assetUnitsApi = {
    * sticker that will outlive it.
    */
   label: (id) => api.get(`/asset-units/${id}/label`),
+  /**
+   * Labels for SELECTED units, in the order given (§73) — each the same label
+   * `label` returns. Any unit out of reach fails the whole batch.
+   */
+  labels: (ids) => api.get('/asset-units/labels', { params: { ids: ids.join(',') } }),
   /**
    * Lookup by printed code — REQ-UNIT-011, `CR-008`.
    *

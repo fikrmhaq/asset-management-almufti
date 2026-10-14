@@ -14,6 +14,7 @@ import { ErrorState, LoadingState } from '@/components/ui/states';
 import { Field, FormErrorSummary } from '@/components/form/field';
 import { DetailPage, DetailTabs, SectionCard } from '@/components/patterns/page';
 import { InventoryCodeFormatBuilder } from '@/components/organization/InventoryCodeFormatBuilder';
+import { TeacherStorageRoomPanel } from '@/components/organization/TeacherStorageRoomPanel';
 import { institutions } from './resources';
 
 /**
@@ -48,6 +49,8 @@ export function InstitutionDetailPage() {
    * system-wide-only (`BR-015`) while this one is not.
    */
   const canReadFormat = usePermission('inventory-code-format:read');
+  // REQ-REQUEST-023: its own authority too.
+  const canReadStorageRoom = usePermission('teacher-storage-room:read');
   const [confirming, setConfirming] = useState(false);
 
   const institution = query.data;
@@ -115,6 +118,15 @@ export function InstitutionDetailPage() {
             value: 'inventory-code',
             label: t('organization.inventoryCodeFormat.tab'),
             content: <InventoryCodeFormatBuilder institutionId={id} />,
+          },
+        ]
+      : []),
+    ...(canReadStorageRoom
+      ? [
+          {
+            value: 'teacher-storage-room',
+            label: t('organization.teacherStorageRoom.tab'),
+            content: <TeacherStorageRoomPanel institutionId={id} />,
           },
         ]
       : []),

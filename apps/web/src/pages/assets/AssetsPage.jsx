@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { Can } from '@/auth/guards';
 import { useListParams } from '@/hooks/useListParams';
 import { Button } from '@/components/ui/button';
+import { useAssetScope } from './useAssetScope';
 import { StatusBadge } from '@/components/ui/badge';
 import { DataTable } from '@/components/patterns/data-table';
 import { SearchFilter, SelectFilter, StatusFilter } from '@/components/patterns/filters';
@@ -44,6 +45,7 @@ function resolve(labels, id) {
 }
 
 export function AssetsPage() {
+  const assetScope = useAssetScope();
   const { t } = useTranslation();
   const { params, setParams, setPage, setSort } = useListParams();
   const query = assets.useList(params);
@@ -114,11 +116,16 @@ export function AssetsPage() {
       title={t('assets.list.title')}
       description="The master registry. Each asset has one or more physical units."
       actions={
-        <Can code="asset:create">
-          <Button asChild>
-            <Link to="/assets/new">New asset</Link>
-          </Button>
-        </Can>
+        // P3 (§64.3): a Kajur / Toolman registers through a request, or adds a
+        // unit to an asset they can see — a standalone asset would be out of
+        // their reach at once, and the server refuses it.
+        assetScope.data?.createStandaloneAsset === false ? null : (
+          <Can code="asset:create">
+            <Button asChild>
+              <Link to="/assets/new">New asset</Link>
+            </Button>
+          </Can>
+        )
       }
       filters={
         <>

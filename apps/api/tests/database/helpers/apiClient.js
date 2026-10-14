@@ -7,7 +7,6 @@ import { mainDatabaseUrl } from './db.js';
 // limits, BEFORE the application modules are required — they memoize on first
 // load. `loadDotEnvFiles` never overwrites an already-set variable.
 process.env.DATABASE_URL = mainDatabaseUrl();
-process.env.AUTH_RATE_LIMIT_MAX = '10000';
 process.env.RATE_LIMIT_MAX = '10000';
 
 const require = createRequire(import.meta.url);
@@ -84,9 +83,36 @@ export const api = () => request(app);
  * deleting locations first fails on `fk_asset_units_current_location`.
  */
 export async function resetAssetCoreData() {
+  // Phase 37 (`CR-014`): requests reference locations (their destination),
+  // classifications, users, departments and position assignments, so they go
+  // first — items before their requests, since there is no cascade.
+  // Phase 38: steps reference requests, users and position assignments.
+  // Phase 39: documents reference requests and users.
+  await models.RequestDocument.destroy({ where: {} });
+  // Phase 41: receipts reference links and users; close events, requests.
+  await models.RequestItemUnitReceipt.destroy({ where: {} });
+  // Migration 057: confirmations — after the receipts and photos pointing at
+  // them, before the requests, locations and users they reference.
+  await models.RequestReceiptConfirmation.destroy({ where: {} });
+  await models.RequestCloseEvent.destroy({ where: {} });
+  // Phase 40: registration links reference request items, asset units and users.
+  await models.RequestItemUnit.destroy({ where: {} });
+  // P6: read state references requests and users.
+  await models.RequestView.destroy({ where: {} });
+  // Migration 059: revision notes reference steps and items.
+  await models.RequestStepItemNote.destroy({ where: {} });
+  await models.RequestStep.destroy({ where: {} });
+  // Migration 067 (§73): stock movements reference request items, consumables
+  // and users; request items reference consumables.
+  await models.ConsumableStockMovement.destroy({ where: {} });
+  await models.RequestItem.destroy({ where: {} });
+  await models.Consumable.destroy({ where: {} });
+  await models.Request.destroy({ where: {} });
   // PIC assignments reference locations and users (`NO ACTION`), so they are
   // cleared before either — Phase 21 (`CR-003`).
   await models.LocationPicAssignment.destroy({ where: {} });
+  // Migration 066: unit reports reference units, locations, history and users.
+  await models.AssetUnitReport.destroy({ where: {} });
   await models.FloorPlanArea.destroy({ where: {} });
   await models.LocationFloorPlan.destroy({ where: {} });
   await models.Attachment.destroy({ where: {} });
@@ -96,6 +122,9 @@ export async function resetAssetCoreData() {
   await models.AssetUnitLocation.destroy({ where: {} });
   await models.AssetUnit.destroy({ where: {} });
   await models.Asset.destroy({ where: {} });
+  // Migration 063: an institution's Teacher Storage Room references a location
+  // (`NO ACTION`), so it is released before the locations go.
+  await models.Institution.update({ teacherStorageLocationId: null }, { where: {} });
   await models.Location.destroy({ where: {} });
   await models.Vendor.destroy({ where: {} });
   await models.Contract.destroy({ where: {} });
@@ -152,6 +181,32 @@ export async function resetOrganizationData() {
    */
   await models.DepartmentPicAssignment.destroy({ where: {} });
   await models.LocationPicAssignment.destroy({ where: {} });
+  // Phase 35 (`CR-014`): position assignments reference users, departments and
+  // institutions, so they go before all three.
+  // Phase 37: a file that resets only organization data must still release
+  // requests before the assignments, users and institutions they reference.
+  // Phase 38: steps reference requests, users and position assignments.
+  // Phase 39: documents reference requests and users.
+  await models.RequestDocument.destroy({ where: {} });
+  // Phase 41: receipts reference links and users; close events, requests.
+  await models.RequestItemUnitReceipt.destroy({ where: {} });
+  // Migration 057: confirmations — after the receipts and photos pointing at
+  // them, before the requests, locations and users they reference.
+  await models.RequestReceiptConfirmation.destroy({ where: {} });
+  await models.RequestCloseEvent.destroy({ where: {} });
+  // Phase 40: registration links reference request items, asset units and users.
+  await models.RequestItemUnit.destroy({ where: {} });
+  await models.RequestStep.destroy({ where: {} });
+  // Migration 067 (§73): movements reference items, consumables and users;
+  // consumables reference institutions and users.
+  await models.ConsumableStockMovement.destroy({ where: {} });
+  await models.RequestItem.destroy({ where: {} });
+  await models.Consumable.destroy({ where: {} });
+  await models.Request.destroy({ where: {} });
+  await models.PositionAssignment.destroy({ where: {} });
+  // Phase 36 (`CR-014`): workflow definitions reference institutions and users.
+  // Their steps go with them (`fk_wf_step_definition` cascades).
+  await models.WorkflowDefinition.destroy({ where: {} });
   await models.Department.update({ currentPicUserId: null }, { where: {} });
   await models.Location.update({ currentPicUserId: null }, { where: {} });
   await models.User.destroy({ where: {} });

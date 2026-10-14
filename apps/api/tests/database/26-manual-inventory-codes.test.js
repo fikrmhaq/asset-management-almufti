@@ -136,7 +136,12 @@ describe("the client's target format, end to end", () => {
     expect(await models.AssetUnit.count()).toBe(1);
   });
 
-  it('refuses an asset with no contract, since the funding source is unreachable', async () => {
+  /**
+   * `DEC-131` superseded (REQ-UNIT-012, migration 056): an asset with no
+   * contract is refused only while the unit records no funding source either —
+   * and the refusal names the field the registrar can fill, not `contractId`.
+   */
+  it('refuses a contractless asset with no funding source, naming fundingSourceId', async () => {
     await setFormat(CLIENT_FORMAT);
     const asset = (
       await post('/assets', {
@@ -149,7 +154,9 @@ describe("the client's target format, end to end", () => {
     const response = await post(`/assets/${asset.id}/units`, { numberComposition: '001' });
 
     expect(response.status).toBe(400);
-    expect(response.body.error.details[0].field).toBe('contractId');
+    expect(response.body.error.message).toBe('A funding source is required for this inventory code');
+    expect(response.body.error.details[0].field).toBe('fundingSourceId');
+    expect(await models.AssetUnit.count()).toBe(0);
   });
 });
 
@@ -206,7 +213,11 @@ describe('the registration hint (`DEC-133`)', () => {
 
     const { body } = await get(`/assets/${asset.id}`);
 
-    expect(body.data.unitRegistration).toEqual({ numberComposition: { required: false } });
+    expect(body.data.unitRegistration).toEqual({
+      numberComposition: { required: false },
+      // REQ-UNIT-012: whether the code carries the funding source, flag only.
+      fundingSource: { inCode: false },
+    });
   });
 
   it('asks for one value per unit when no sequence separates them', async () => {

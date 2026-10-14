@@ -60,12 +60,6 @@ describe('configuration (05-infrastructure.md §1.2)', () => {
     expect(loadConfig(validEnv).auth).toMatchObject({ accessExpiry: '15m', refreshExpiry: '7d' });
   });
 
-  it('applies a far stricter rate limit to auth than to the API at large', () => {
-    const { rateLimit, authRateLimit } = loadConfig(validEnv).http;
-
-    expect(authRateLimit.max).toBeLessThan(rateLimit.max);
-  });
-
   it('reports every problem at once rather than one per restart', () => {
     expect(() => loadConfig({ NODE_ENV: 'test' })).toThrow(
       /DATABASE_URL[\s\S]*REDIS_URL[\s\S]*STORAGE_PATH/
@@ -151,6 +145,31 @@ describe('configuration (05-infrastructure.md §1.2)', () => {
       (value) => {
         expect(() => loadConfig({ ...validEnv, BUSINESS_TIMEZONE: value })).toThrow(
           /BUSINESS_TIMEZONE/
+        );
+      }
+    );
+  });
+
+  /** Request Updates baseline — P6 (`IMPLEMENTATION_PLAN.md` §64.6). */
+  describe('request updates baseline (P6)', () => {
+    it('defaults to the rollout day, in business time', () => {
+      expect(loadConfig(validEnv).requestUpdatesSince.toISOString()).toBe(
+        '2026-09-28T17:00:00.000Z'
+      );
+    });
+
+    it('accepts a deployment’s own moment', () => {
+      expect(
+        loadConfig({ ...validEnv, REQUEST_UPDATES_SINCE: '2027-01-02T08:00:00+07:00' })
+          .requestUpdatesSince.toISOString()
+      ).toBe('2027-01-02T01:00:00.000Z');
+    });
+
+    it.each(['2026-09-29', 'yesterday', '2026-09-29T00:00:00'])(
+      'refuses to start on "%s" — a date-time with an offset is required',
+      (value) => {
+        expect(() => loadConfig({ ...validEnv, REQUEST_UPDATES_SINCE: value })).toThrow(
+          /REQUEST_UPDATES_SINCE/
         );
       }
     );

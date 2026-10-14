@@ -50,7 +50,12 @@ function createApp({ config = getConfig(), logger = getLogger(), health = {} } =
 
   app.use(securityHeaders());
   app.use(corsPolicy(config.http));
-  app.use(rateLimiter(config.http.rateLimit));
+  // Login is never rate-limited, so a sign-in never answers 429.
+  app.use(
+    rateLimiter(config.http.rateLimit, {
+      skip: (req) => req.method === 'POST' && req.path === '/api/v1/auth/login',
+    })
+  );
 
   const bodyLimit = `${config.http.maxRequestBodyKb}kb`;
   app.use(express.json({ limit: bodyLimit }));

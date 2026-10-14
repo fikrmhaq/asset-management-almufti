@@ -8,6 +8,7 @@ import { normalizeError } from '@/api/errors';
 import { Can } from '@/auth/guards';
 import { usePermission } from '@/auth/useSession';
 import { queryKeys } from '@/lib/queryKeys';
+import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StatusBadge } from '@/components/ui/badge';
@@ -26,8 +27,10 @@ import {
 } from '@/components/patterns/page';
 import { AttachmentsPanel } from '@/components/asset/AttachmentsPanel';
 import { AttributeValueForm, toValueMap } from '@/components/asset/AttributeValueForm';
-import { useContractItemOptions } from '../procurement/referenceOptions';
+import { UnitNumberFields } from '@/components/asset/UnitNumberFields';
+import { useContractItemOptions, useFundingSourceOptions } from '../procurement/referenceOptions';
 import { useDepartmentOptions } from './referenceOptions';
+import { useAssetScope } from './useAssetScope';
 import { assets } from './resources';
 import { useTranslation } from 'react-i18next';
 
@@ -93,6 +96,8 @@ function UnitsTab({ asset }) {
   const [contractItemId, setContractItemId] = useState('');
   const [departmentId, setDepartmentId] = useState('');
   const [numberComposition, setNumberComposition] = useState('');
+  const [triedSubmit, setTriedSubmit] = useState(false);
+  const [fundingSourceId, setFundingSourceId] = useState('');
 
   /**
    * Whether this institution's format asks the registrar to type part of the
@@ -106,6 +111,10 @@ function UnitsTab({ asset }) {
    */
   const composition = asset.unitRegistration?.numberComposition;
   const needsComposition = Boolean(composition?.required);
+  // REQ-UNIT-012: offered where the code carries the funding source; required by
+  // the server only when the asset's contract names none.
+  const fundingInCode = Boolean(asset.unitRegistration?.fundingSource?.inCode);
+  const fundingSources = useFundingSourceOptions();
 
   const contractItems = useContractItemOptions(asset.contractId);
   // Department is an ASSET UNIT property, never an Asset one (`CR-003` §15), so
@@ -113,9 +122,34 @@ function UnitsTab({ asset }) {
   // institution cannot take one at all.
   const departments = useDepartmentOptions(asset.institutionId);
   const canPickDepartment = Boolean(asset.institutionId) && departments.allowed;
+  // P3 (§64.3): a Kajur / Toolman adds units to their own department only — one
+  // shown read-only, several offered alone; never another, never none.
+  const assetScope = useAssetScope();
+  const ownDepartments = assetScope.data?.departmentScoped ? assetScope.data.departments : null;
+  const soleDepartment = ownDepartments?.length === 1 ? ownDepartments[0] : null;
   // Nothing to trace to on an asset with no procurement record, so the field is
   // absent rather than empty.
   const canPickItem = Boolean(asset.contractId) && contractItems.allowed;
+
+  /**
+   * P4 (§64.4): the department and funding source this unit will be registered
+   * with, exactly as the save below sends them — the preview is rendered from
+   * the same inputs. A Kajur / Toolman with several departments has none to
+   * preview with until they choose (the server refuses "none" for them).
+   */
+  const unitDepartmentId = ownDepartments
+    ? (soleDepartment?.id ?? (departmentId || null))
+    : canPickDepartment
+      ? departmentId || null
+      : null;
+  const previewRequest =
+    needsComposition && !(ownDepartments && !unitDepartmentId)
+      ? {
+          assetId,
+          departmentId: unitDepartmentId,
+          ...(fundingSourceId ? { fundingSourceId: Number(fundingSourceId) } : {}),
+        }
+      : null;
 
   const query = useQuery({
     queryKey: queryKeys.assets.sub(assetId, 'units'),
@@ -131,6 +165,8 @@ function UnitsTab({ asset }) {
       setContractItemId('');
       setDepartmentId('');
       setNumberComposition('');
+      setTriedSubmit(false);
+      setFundingSourceId('');
       toast.success('Unit created');
     },
     onError: (error) => toast.fromError(error, { includeValidation: true }),
@@ -211,39 +247,73 @@ function UnitsTab({ asset }) {
         loading={create.isPending}
         onSubmit={(event) => {
           event.preventDefault();
+          setTriedSubmit(true);
+          // An empty unit number is known here; the rest is the server's call.
+          if (needsComposition && !numberComposition.trim()) return;
           create.mutate({
             description: description || undefined,
             contractItemId: contractItemId || undefined,
             // Only when the control was actually offered, as with the
             // procurement item: sending a field the caller never saw would
             // assign — or refuse — on their behalf.
-            ...(canPickDepartment ? { departmentId: departmentId || undefined } : {}),
+            ...(ownDepartments
+              ? { departmentId: soleDepartment?.id ?? (departmentId || undefined) }
+              : canPickDepartment
+                ? { departmentId: departmentId || undefined }
+                : {}),
             // Same rule: the write body is strict, so a value this institution
             // never asked for would be refused as an unknown field rather than
             // ignored (`06-api.md` §5.2).
-            ...(needsComposition ? { numberComposition: numberComposition || undefined } : {}),
+            ...(needsComposition ? { numberComposition: numberComposition.trim() } : {}),
+            ...(fundingSourceId ? { fundingSourceId: Number(fundingSourceId) } : {}),
           });
         }}
       >
         {/*
           First, because it is the only field here that becomes permanent. The
-          composition is an input to the inventory code, and the code is frozen
+          unit number is an input to the inventory code, and the code is frozen
           the moment the unit is registered (`BR-020`) — `PATCH` rejects both.
+          P4 (§64.4): shown with the code it will become, live.
         */}
         {needsComposition ? (
-          <Field
-            label={t('units.fields.numberComposition')}
-            hint={t('units.fields.numberCompositionHint', { max: composition.maxLength })}
-            required
+          <UnitNumberFields
+            values={[numberComposition]}
+            onChange={([next]) => setNumberComposition(next)}
+            perUnit
+            maxLength={composition.maxLength}
+            previewRequest={previewRequest}
+            waitingFor={previewRequest ? undefined : t('units.unitNumber.waitingForDepartment')}
+            showErrors={triedSubmit}
             error={create.error ? normalizeError(create.error).fieldErrors.numberComposition : null}
+          />
+        ) : null}
+
+        {fundingInCode ? (
+          <Field
+            label={t('requests.registration.fundingSource')}
+            hint={
+              fundingSources.allowed
+                ? t('requests.registration.fundingSourceHint')
+                : t('requests.registration.fundingSourceNoAccess')
+            }
+            error={create.error ? normalizeError(create.error).fieldErrors.fundingSourceId : null}
           >
-            {(fieldProps) => (
-              <Input
+            {({ invalid, ...fieldProps }) => (
+              <select
                 {...fieldProps}
-                value={numberComposition}
-                maxLength={composition.maxLength}
-                onChange={(event) => setNumberComposition(event.target.value)}
-              />
+                aria-invalid={invalid || undefined}
+                value={fundingSourceId}
+                disabled={!fundingSources.allowed}
+                onChange={(event) => setFundingSourceId(event.target.value)}
+                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">{t('requests.registration.noFundingSource')}</option>
+                {fundingSources.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             )}
           </Field>
         ) : null}
@@ -279,7 +349,38 @@ function UnitsTab({ asset }) {
           </Field>
         ) : null}
 
-        {canPickDepartment ? (
+        {ownDepartments ? (
+          <Field
+            label={t('common.fields.department')}
+            hint={t('units.fields.departmentScopedHint')}
+            required
+          >
+            {({ invalid, ...fieldProps }) =>
+              soleDepartment ? (
+                <p className="text-sm font-medium" data-testid="unit-department-fixed">
+                  {soleDepartment.name} ({soleDepartment.code})
+                </p>
+              ) : (
+                <select
+                  {...fieldProps}
+                  aria-invalid={invalid || undefined}
+                  value={departmentId}
+                  onChange={(event) => setDepartmentId(event.target.value)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="" disabled>
+                    {t('units.fields.chooseDepartment')}
+                  </option>
+                  {ownDepartments.map((department) => (
+                    <option key={department.id} value={department.id}>
+                      {department.name} ({department.code})
+                    </option>
+                  ))}
+                </select>
+              )
+            }
+          </Field>
+        ) : canPickDepartment ? (
           <Field label={t('common.fields.department')} hint={t('units.fields.departmentHint')}>
             {({ invalid, ...fieldProps }) => (
               <select
@@ -375,6 +476,10 @@ export function AssetDetailPage() {
   const [confirming, setConfirming] = useState(false);
 
   const asset = query.data;
+  // P3 (§64.3): a change to the WHOLE asset — edit, (de)activate, its attribute
+  // values, an asset-level file — only where the server allows it: not for a
+  // Kajur / Toolman while another department has units of the asset.
+  const wholeAssetChange = asset?.scope?.wholeAssetChange !== false;
 
   if (query.isLoading) return <LoadingState variant="detail" />;
   if (query.isError) return <ErrorState error={query.error} onRetry={query.refetch} />;
@@ -385,23 +490,30 @@ export function AssetDetailPage() {
       description={asset.classification?.name}
       badge={<StatusBadge value={asset.isActive ? 'active' : 'inactive'} />}
       actions={
-        <>
-          <Can code="asset:update">
-            <Button asChild variant="outline">
-              <Link to={`/assets/${id}/edit`}>Edit</Link>
-            </Button>
-          </Can>
-          <Can code="asset:deactivate">
-            <Button
-              variant={asset.isActive ? 'outline' : 'default'}
-              onClick={() => setConfirming(true)}
-            >
-              {asset.isActive ? 'Deactivate' : 'Reactivate'}
-            </Button>
-          </Can>
-        </>
+        wholeAssetChange ? (
+          <>
+            <Can code="asset:update">
+              <Button asChild variant="outline">
+                <Link to={`/assets/${id}/edit`}>Edit</Link>
+              </Button>
+            </Can>
+            <Can code="asset:deactivate">
+              <Button
+                variant={asset.isActive ? 'outline' : 'default'}
+                onClick={() => setConfirming(true)}
+              >
+                {asset.isActive ? 'Deactivate' : 'Reactivate'}
+              </Button>
+            </Can>
+          </>
+        ) : null
       }
     >
+      {wholeAssetChange ? null : (
+        <Alert variant="info" data-testid="shared-asset-note">
+          {t('assets.detail.sharedAsset')}
+        </Alert>
+      )}
       <DetailTabs
         tabs={[
           { value: 'overview', label: 'Overview', content: <OverviewTab asset={asset} /> },
@@ -412,7 +524,7 @@ export function AssetDetailPage() {
             content: (
               <AttributeValuesTab
                 ownerId={id}
-                canEdit={canEditAttributes}
+                canEdit={canEditAttributes && wholeAssetChange}
                 load={{
                   key: queryKeys.assets.sub(id, 'attribute-values'),
                   fn: () => assetsApi.attributeValues(id),
@@ -426,7 +538,7 @@ export function AssetDetailPage() {
             label: 'Attachments',
             content: (
               <SectionCard title={t('assets.detail.attachments')}>
-                <AttachmentsPanel assetId={id} />
+                <AttachmentsPanel assetId={id} wholeAssetChange={wholeAssetChange} />
               </SectionCard>
             ),
           },

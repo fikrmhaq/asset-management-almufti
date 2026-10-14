@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
-import { afterEach, beforeEach } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
+
+import { requestsApi } from '@/api/requests';
 
 import { changeLanguage, DEFAULT_LANGUAGE, initI18n } from '@/i18n';
 
@@ -43,6 +45,14 @@ initI18n({ language: DEFAULT_LANGUAGE });
 
 beforeEach(() => {
   changeLanguage(DEFAULT_LANGUAGE);
+  /**
+   * P5 + P6 (§64.5, §64.6): the sidebar asks for the request counts and the
+   * request page marks itself seen, on every screen that shows them. Answered
+   * here — nothing needing, nothing updated — so no test reaches the network by
+   * accident; a test about them sets its own answer.
+   */
+  vi.spyOn(requestsApi, 'attention').mockResolvedValue({ actionNeeded: 0, updated: 0 });
+  vi.spyOn(requestsApi, 'markViewed').mockResolvedValue(undefined);
 });
 
 afterEach(() => {

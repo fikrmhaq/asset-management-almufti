@@ -147,6 +147,18 @@ describe('AssetUnitsPage', () => {
    * the real contract anyway — `useListParams` is what turns it into a request,
    * and a shared filtered link has to work.
    */
+  /** REQ-REQUEST-024: received and not placed — derived by the server. */
+  it('forwards the needs-placement filter to the server', async () => {
+    renderScreen(<AssetUnitsPage />, { route: '/?needsPlacement=true' });
+
+    expect(await screen.findByLabelText('Placement')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(assetCoreApi.assetUnitsApi.list).toHaveBeenCalledWith(
+        expect.objectContaining({ needsPlacement: 'true' })
+      )
+    );
+  });
+
   it('forwards a department filter to the server', async () => {
     renderScreen(<AssetUnitsPage />, { route: '/?departmentId=dept-tkj' });
 

@@ -20,6 +20,7 @@ const { NotFoundError, ConflictError, ValidationError } = require('../../errors'
 const { toFindOptions, paginate } = require('../../query/listQuery');
 const { activeStatus, equals, containsAny } = require('../../query/filtering');
 const { assertTransition } = require('../../domain/lifecycle');
+const { needsPlacementWhere } = require('../../domain/receiptPlacement');
 const {
   assertCanAccess,
   scopeFilter,
@@ -57,6 +58,8 @@ const FILTERS = {
   condition: (value) => equals('currentCondition', value),
   locationId: (value) => equals('currentLocationId', value),
   q: (value) => containsAny(['inventoryCode', 'description'], value),
+  // REQ-REQUEST-024: the one derived definition, never a stored flag.
+  needsPlacement: (value) => needsPlacementWhere(value),
 };
 
 function serialize(unit) {
@@ -88,6 +91,16 @@ function serialize(unit) {
      */
     department: unit.department
       ? { id: unit.department.id, code: unit.department.code, name: unit.department.name }
+      : null,
+    /**
+     * The funding source this unit was acquired with, when it recorded one
+     * (REQ-UNIT-012, migration 056). Only the unit's OWN fact: a unit that
+     * recorded none and is traced to a Contract still reports `null` here — the
+     * Contract's value is read through the Contract, never copied onto the unit.
+     */
+    fundingSourceId: unit.fundingSourceId ?? null,
+    fundingSource: unit.fundingSource
+      ? { id: unit.fundingSource.id, code: unit.fundingSource.code, name: unit.fundingSource.name }
       : null,
     lifecycleState: unit.lifecycleState,
     currentCondition: unit.currentCondition ?? null,
@@ -155,6 +168,8 @@ async function getById(id, principal, { models = getModels() } = {}) {
       // Phase 20 (`CR-003`): resolved so the response can name the department
       // rather than hand the client a UUID to look up.
       { association: 'department', attributes: ['id', 'code', 'name'] },
+      // REQ-UNIT-012: the unit's own acquisition fact, named rather than an id.
+      { association: 'fundingSource', attributes: ['id', 'code', 'name'] },
     ],
   });
 
@@ -171,7 +186,24 @@ async function getById(id, principal, { models = getModels() } = {}) {
   return unit;
 }
 
-const detail = async (id, principal, options) => serialize(await getById(id, principal, options));
+/**
+ * The unit, plus the Request it was registered against — `CR-014` Phase 40
+ * D7. `requestItem` is `null` when there is no link AND whenever the caller
+ * could not open that Request: the unit detail never reveals one. Only the two
+ * detail reads carry it; lists do not.
+ */
+async function withRequestItem(unit, principal, options = {}) {
+  // Required here, not at the top: `domain/requests` is a request-side module
+  // and this one must stay loadable without it.
+  const { requestItemReferenceFor } = require('../../domain/requests');
+  return {
+    ...serialize(unit),
+    requestItem: await requestItemReferenceFor(unit.id, principal, options),
+  };
+}
+
+const detail = async (id, principal, options) =>
+  withRequestItem(await getById(id, principal, options), principal, options);
 
 /**
  * Every Asset Unit the caller may reach — `06-api.md` §5.2, `CR-005`.
@@ -325,7 +357,14 @@ async function create(assetId, body, principal, { models = getModels() } = {}) {
     count: 1,
   });
 
-  const { numberComposition: _supplied, ...unitBody } = body;
+  // REQ-UNIT-012: the unit's own funding source, checked against the asset's
+  // Contract; the code falls back to the Contract's when none is supplied.
+  const funding = await resolveFundingSource(
+    { contractId: asset.contractId ?? null, fundingSourceId: body.fundingSourceId },
+    { models }
+  );
+
+  const { numberComposition: _supplied, fundingSourceId: _funding, ...unitBody } = body;
 
   const unit = await withTransaction(
     async (transaction) => {
@@ -336,6 +375,7 @@ async function create(assetId, body, principal, { models = getModels() } = {}) {
         // (`CR-006`). Already validated by `assertDepartmentAssignable` above.
         departmentId: body.departmentId ?? null,
         numberCompositions: numberComposition === null ? [] : [numberComposition],
+        fundingSource: funding.source,
       });
 
       return models.AssetUnit.create(
@@ -344,6 +384,7 @@ async function create(assetId, body, principal, { models = getModels() } = {}) {
           assetId,
           inventoryCode,
           numberComposition,
+          fundingSourceId: funding.fundingSourceId,
           createdBy: principal.userId,
           updatedBy: principal.userId,
         },
@@ -503,12 +544,30 @@ async function applyStateChange(
     transaction,
   });
 
+  /**
+   * Condition, by what writes the row:
+   *
+   *   MANUAL, BORROWING  required — carried forward, refused when there is none
+   *                      (unchanged)
+   *   SYSTEM             none (REQ-REQUEST-024: receipt placement records WHERE)
+   *   REPORT             the reported one, else carried forward, else none
+   *                      (REQ-REQUEST-025: a confirmed move of a unit that has
+   *                      never had a condition must not invent one)
+   *
+   * The unit's current condition changes only when the row states one — never
+   * cleared, never invented.
+   */
+  const recordsNoCondition = entryType === 'SYSTEM';
+  const mayLackCondition = recordsNoCondition || entryType === 'REPORT';
+
   // Carry forward whatever the caller did not supply.
-  const condition = body.condition ?? current?.condition ?? unit.currentCondition;
+  const condition = recordsNoCondition
+    ? null
+    : (body.condition ?? current?.condition ?? unit.currentCondition ?? null);
   const locationId = body.locationId ?? current?.locationId ?? unit.currentLocationId;
   const lifecycleState = body.lifecycleState ?? unit.lifecycleState;
 
-  if (!condition) {
+  if (!mayLackCondition && !condition) {
     throw new ValidationError('A condition is required for the first history entry', [
       { field: 'condition', issue: 'is required when the unit has no recorded condition' },
     ]);
@@ -547,7 +606,7 @@ async function applyStateChange(
     await current.update({ effectiveTo: effectiveFrom }, { transaction });
   }
 
-  await models.LongitudinalHistory.create(
+  const created = await models.LongitudinalHistory.create(
     {
       assetUnitId: id,
       description: body.description,
@@ -575,13 +634,16 @@ async function applyStateChange(
 
   await unit.update(
     {
-      currentCondition: condition,
+      ...(condition ? { currentCondition: condition } : {}),
       currentLocationId: locationId,
       lifecycleState,
       updatedBy: principal.userId,
     },
     { transaction }
   );
+
+  // The row written — REQ-REQUEST-025 links a confirmed report to it.
+  return created;
 }
 
 /**
@@ -614,6 +676,162 @@ async function recordHistory(id, body, principal, options = {}) {
 }
 
 /**
+ * Everything an inventory code is rendered from, for one asset (existing, or the
+ * one a registration is about to create) — THE SAME for issuing codes
+ * (`allocateCodesForAsset`) and for previewing them (`modules/inventoryCodes`,
+ * P4 `IMPLEMENTATION_PLAN.md` §64.4), so the two can never diverge.
+ *
+ * `refusals` are the funding-source refusals of REQ-UNIT-012 (migration 056):
+ * issuing throws the first, exactly as before; the preview reports them.
+ *
+ * @returns {Promise<null | {institution: object, format: string, context: object,
+ *   refusals: import('../../errors').ValidationError[]}>} `null` when the asset
+ *   has no institution, and so no format
+ */
+async function codeContextForAsset(
+  asset,
+  { models = getModels(), transaction, departmentId = null, fundingSource = undefined } = {}
+) {
+  if (!asset.institutionId) return null;
+
+  const institution = await models.Institution.findByPk(asset.institutionId, { transaction });
+  if (!institution) return null;
+
+  const refusals = [];
+  const format = formatFor(institution);
+  const tokens = tokensIn(format);
+
+  /**
+   * Loaded only when the format actually names them — most formats want none of
+   * this, and the common registration path should stay at the queries `CR-006`
+   * already made. But loaded BEFORE the code is built, because a missing value
+   * is reported as a validation error rather than guessed at.
+   */
+  const department =
+    departmentId && tokens.has('DEPARTMENT_CODE')
+      ? await models.Department.findByPk(departmentId, { transaction })
+      : null;
+
+  const classification = tokens.has('CLASSIFICATION_LEAF_LABEL')
+    ? await models.AssetClassification.findByPk(asset.classificationId, { transaction })
+    : null;
+
+  /**
+   * The funding source segment. A caller that accepts the units' own funding
+   * source has already resolved it: the units' value, else the asset's
+   * Contract's (REQ-UNIT-012 — the unit's value takes precedence). With neither,
+   * the registration is refused on the field the registrar can actually fill,
+   * rather than with the format's generic refusal naming `contractId`, which a
+   * contractless asset can never satisfy (`DEC-131`, superseded).
+   *
+   * A caller with no such field keeps the original two nullable hops —
+   * `assets.contract_id`, then the Contract's optional funding source — and the
+   * original refusal (`DEC-117`).
+   */
+  let resolvedFundingCode = fundingSource?.code ?? null;
+  if (fundingSource === undefined) {
+    const contract =
+      asset.contractId && tokens.has('FUNDING_SOURCE_CODE')
+        ? await models.Contract.findByPk(asset.contractId, {
+            include: [{ association: 'fundingSource', attributes: ['id', 'code'] }],
+            transaction,
+          })
+        : null;
+    resolvedFundingCode = contract?.fundingSource?.code ?? null;
+  } else if (fundingSource && !fundingSource.code && tokens.has('FUNDING_SOURCE_CODE')) {
+    refusals.push(new ValidationError('The funding source has no code for the inventory code', [
+      {
+        field: 'fundingSourceId',
+        issue:
+          `"${fundingSource.name}" has no code, and this institution's inventory codes include ` +
+          'the funding source code; give it a code under Reference data, or choose another',
+      },
+    ]));
+  } else if (fundingSource === null && tokens.has('FUNDING_SOURCE_CODE')) {
+    refusals.push(new ValidationError('A funding source is required for this inventory code', [
+      {
+        field: 'fundingSourceId',
+        issue:
+          "this institution's inventory codes include the funding source, and neither these " +
+          "units nor the asset's contract record one; choose the funding source the units " +
+          'were acquired with (REQ-UNIT-012)',
+      },
+    ]));
+  }
+
+  const context = {
+    institution,
+    classificationId: asset.classificationId,
+    classificationName: classification?.name ?? null,
+    department,
+    fundingSourceCode: resolvedFundingCode,
+    at: new Date(),
+  };
+
+  return { institution, format, context, refusals };
+}
+
+/**
+ * The funding source a registration's units were acquired with — REQ-UNIT-012,
+ * migration 056. Contract stays optional (F8); the funding source is an
+ * acquisition fact the units may record themselves.
+ *
+ *   - `fundingSourceId` supplied: it must exist. When the asset (or, for a new
+ *     asset, the contract item it is being established under) has a Contract
+ *     that names a funding source, the supplied one must be that same source —
+ *     a unit bought under a contract is not recorded, and never coded, as funded
+ *     otherwise (approved at design, 2026-09-28). It is stored on each unit.
+ *   - Not supplied: nothing is stored, and the code falls back to the
+ *     Contract's funding source, if any. Nothing is copied from the Contract onto
+ *     the unit, and nothing is invented.
+ *
+ * Resolved before the registration's transaction, so a bad value costs no lock.
+ *
+ * @param {{ contractId: string|null, fundingSourceId?: number|null }} input
+ * @returns {Promise<{ fundingSourceId: number|null, source: {code: string|null, name: string}|null }>}
+ *   `fundingSourceId` to store on the units; `source` for `allocateCodesForAsset`.
+ * @throws {ValidationError}
+ */
+async function resolveFundingSource({ contractId, fundingSourceId }, { models = getModels() } = {}) {
+  const contract = contractId
+    ? await models.Contract.findByPk(contractId, {
+        include: [{ association: 'fundingSource', attributes: ['id', 'code', 'name'] }],
+      })
+    : null;
+  const contractSource = contract?.fundingSource ?? null;
+
+  if (fundingSourceId === undefined || fundingSourceId === null) {
+    return {
+      fundingSourceId: null,
+      source: contractSource ? { code: contractSource.code ?? null, name: contractSource.name } : null,
+    };
+  }
+
+  const supplied = await models.FundingSource.findByPk(fundingSourceId);
+  if (!supplied) {
+    throw new ValidationError('The funding source does not exist', [
+      { field: 'fundingSourceId', issue: 'must reference an existing funding source' },
+    ]);
+  }
+
+  if (contractSource && contractSource.id !== supplied.id) {
+    throw new ValidationError("The funding source does not match the asset's contract", [
+      {
+        field: 'fundingSourceId',
+        issue:
+          `the asset's contract ${contract.contractNumber} is funded by ` +
+          `${contractSource.name}; leave the funding source empty, or choose that one`,
+      },
+    ]);
+  }
+
+  return {
+    fundingSourceId: supplied.id,
+    source: { code: supplied.code ?? null, name: supplied.name },
+  };
+}
+
+/**
  * Allocates inventory codes for units about to be registered against `asset`.
  *
  * TWO ABSENCES, AND THEY ARE NOT THE SAME (REQ-UNIT-007).
@@ -638,53 +856,30 @@ async function recordHistory(id, body, principal, options = {}) {
 async function allocateCodesForAsset(
   asset,
   count,
-  { models = getModels(), transaction, departmentId = null, numberCompositions = [] }
+  {
+    models = getModels(),
+    transaction,
+    departmentId = null,
+    numberCompositions = [],
+    /**
+     * REQ-UNIT-012 (migration 056). A caller that lets the registrar record the
+     * units' funding source resolves it first (`resolveFundingSource`) and
+     * passes its `source` here — `null` meaning "none, from either the units or
+     * the asset's Contract". Left `undefined` by a caller that has no such field
+     * (the contract-item path), which keeps the Contract-only lookup below.
+     */
+    fundingSource = undefined,
+  }
 ) {
-  if (!asset.institutionId) return Array.from({ length: count }, () => null);
-
-  const institution = await models.Institution.findByPk(asset.institutionId, { transaction });
-  if (!institution) return Array.from({ length: count }, () => null);
-
-  const format = formatFor(institution);
-  const tokens = tokensIn(format);
-
-  /**
-   * Loaded only when the format actually names them — most formats want none of
-   * this, and the common registration path should stay at the queries `CR-006`
-   * already made. But loaded BEFORE the code is built, because a missing value
-   * is reported as a validation error rather than guessed at.
-   */
-  const department =
-    departmentId && tokens.has('DEPARTMENT_CODE')
-      ? await models.Department.findByPk(departmentId, { transaction })
-      : null;
-
-  const classification = tokens.has('CLASSIFICATION_LEAF_LABEL')
-    ? await models.AssetClassification.findByPk(asset.classificationId, { transaction })
-    : null;
-
-  /**
-   * Two nullable hops: `assets.contract_id` is nullable for donated,
-   * self-constructed and migrated assets, and the contract's own funding source
-   * is optional. Either absence refuses the registration rather than dropping
-   * the segment (`DEC-117`).
-   */
-  const contract =
-    asset.contractId && tokens.has('FUNDING_SOURCE_CODE')
-      ? await models.Contract.findByPk(asset.contractId, {
-          include: [{ association: 'fundingSource', attributes: ['id', 'code'] }],
-          transaction,
-        })
-      : null;
-
-  const context = {
-    institution,
-    classificationId: asset.classificationId,
-    classificationName: classification?.name ?? null,
-    department,
-    fundingSourceCode: contract?.fundingSource?.code ?? null,
-    at: new Date(),
-  };
+  const built = await codeContextForAsset(asset, {
+    models,
+    transaction,
+    departmentId,
+    fundingSource,
+  });
+  if (!built) return Array.from({ length: count }, () => null);
+  const { format, context } = built;
+  if (built.refusals.length > 0) throw built.refusals[0];
 
   /**
    * ONE RENDERER, TWO OUTCOMES — `CR-007` `DEC-123`.
@@ -882,7 +1077,7 @@ async function getByInventoryCode(inventoryCode, principal, { models = getModels
 }
 
 const detailByCode = async (code, principal, options) =>
-  serialize(await getByInventoryCode(code, principal, options));
+  withRequestItem(await getByInventoryCode(code, principal, options), principal, options);
 
 /**
  * Everything a printed label needs, in one call — REQ-UNIT-009.
@@ -974,6 +1169,21 @@ async function labelsForAsset(assetId, principal, { models = getModels() } = {})
   return Promise.all(labelled.map((unit) => buildLabel(unit, { models })));
 }
 
+/**
+ * Labels for selected units, in the order given — batch printing (§73). Each
+ * unit is reached exactly as its own label is (`getById`: institution and PIC /
+ * department scope), so one out of reach is `404` for the whole batch, and each
+ * label is the one `label()` builds — the same QR address, never a batch-only
+ * payload. A unit with no inventory code cannot be labelled and is left out,
+ * as on the per-asset sheet.
+ */
+async function labelsFor(ids, principal, { models = getModels() } = {}) {
+  const units = [];
+  for (const id of ids) units.push(await getById(id, principal, { models }));
+  const labelled = units.filter((unit) => unit.inventoryCode);
+  return Promise.all(labelled.map((unit) => buildLabel(unit, { models })));
+}
+
 /** The classification a unit's attribute values must belong to (`BR-010`). */
 async function classificationFor(unit, { models = getModels() } = {}) {
   const asset = unit.asset ?? (await models.Asset.findByPk(unit.assetId));
@@ -981,6 +1191,7 @@ async function classificationFor(unit, { models = getModels() } = {}) {
 }
 
 module.exports = {
+  codeContextForAsset,
   list,
   listForAsset,
   detail,
@@ -997,8 +1208,11 @@ module.exports = {
   detailByCode,
   label,
   labelsForAsset,
+  labelsFor,
   allocateCodesForAsset,
+  resolveFundingSource,
   resolveCompositions,
+  assertContractItem,
   asDuplicateCodeError,
   classificationFor,
   serialize,

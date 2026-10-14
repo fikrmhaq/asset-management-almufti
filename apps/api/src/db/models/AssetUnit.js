@@ -58,6 +58,15 @@ module.exports = (sequelize, DataTypes) =>
       },
       currentCondition: { type: DataTypes.ENUM(...CONDITIONS), allowNull: true },
       currentLocationId: { type: DataTypes.UUID, allowNull: true },
+      /**
+       * Acquisition facts — `CR-014` (`DEC-S`), REQ-UNIT-012, migration 056.
+       * Each optional and independent of any Contract. The unit's own funding
+       * source takes precedence over its Contract's, and is what
+       * `FUNDING_SOURCE_CODE` renders when present. Nothing is back-filled.
+       * `acquisitionDate` is stored as specified and has no reader yet.
+       */
+      fundingSourceId: { type: DataTypes.INTEGER, allowNull: true },
+      acquisitionDate: { type: DataTypes.DATEONLY, allowNull: true },
       isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       createdBy: { type: DataTypes.UUID, allowNull: true },
       updatedBy: { type: DataTypes.UUID, allowNull: true },

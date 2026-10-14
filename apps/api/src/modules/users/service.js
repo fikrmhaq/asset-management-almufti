@@ -232,6 +232,37 @@ async function assertNoActivePicAssignments(user, nextInstitutionId, models) {
   );
 }
 
+/**
+ * The same refusal for school positions — Phase 35 (`CR-014`, decision D2).
+ *
+ * A position assignment records the institution it is held in, and a
+ * department-bound one names a department of that institution. Moving the
+ * holder would leave a live assignment in the institution they left. Kept apart
+ * from `assertNoActivePicAssignments` so the PIC refusal and its message are
+ * unchanged; the position assignment is ended deliberately, first.
+ *
+ * @throws {ConflictError}
+ */
+async function assertNoCurrentPositions(user, nextInstitutionId, models) {
+  if ((user.institutionId ?? null) === (nextInstitutionId ?? null)) return;
+
+  const held = await models.PositionAssignment.count({
+    where: { userId: user.id, isCurrent: true },
+  });
+
+  if (held === 0) return;
+
+  throw new ConflictError(
+    `This user cannot change institution while they hold ${held} school position(s)`,
+    [
+      {
+        field: 'institutionId',
+        issue: 'end their current school-position assignments first (CR-014)',
+      },
+    ]
+  );
+}
+
 async function create(body, principal, { models = getModels(), sequelize = getSequelize() } = {}) {
   const { password, roleIds = [], ...attributes } = body;
 
@@ -287,6 +318,7 @@ async function update(id, body, principal, options = {}) {
     assertCanAssignInstitution(principal, body.institutionId);
     await assertInstitutionExists(body.institutionId, models);
     await assertNoActivePicAssignments(user, body.institutionId, models);
+    await assertNoCurrentPositions(user, body.institutionId, models);
   }
 
   await user.update(body);
@@ -364,6 +396,7 @@ async function removeRole(id, roleId, principal, options = {}) {
 module.exports = {
   list,
   detail,
+  getById,
   create,
   update,
   deactivate: (id, principal, options) => setActive(id, false, principal, options),

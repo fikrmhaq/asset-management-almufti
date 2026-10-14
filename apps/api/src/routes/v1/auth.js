@@ -52,26 +52,18 @@ function refreshCookieOptions(config) {
 function authRouter({ config = getConfig(), service = authService } = {}) {
   const router = Router();
 
-  // Stricter than the global limiter: this is the control that makes password
-  // guessing impractical (§12.3, REQ-NFR-SEC-004).
-  const loginLimiter = rateLimiter(config.http.authRateLimit);
-
-  // Refresh gets its OWN, far looser limiter, and this separation matters.
+  // Login is deliberately NOT rate-limited, by request: users kept being locked
+  // out with 429 on sign-in. It is also exempt from the app-wide limiter (see
+  // `app.js`), so a login attempt never answers 429.
   //
-  // It used to share `loginLimiter`. But refresh is not a guessing surface — it
-  // is authenticated by a signed httpOnly cookie, so there is no secret to try
-  // repeatedly — while it IS spent once on every single page load. Sharing a
-  // ceiling of 10 per 15 minutes meant the eleventh reload returned 429, the
-  // client read that as "not signed in", and the user was silently logged out of
-  // a perfectly valid session.
-  //
-  // A limit still applies, so a stolen cookie replayed in a loop is not free. It
-  // is set where ordinary use cannot reach it.
+  // Refresh keeps its own, loose limiter: it is authenticated by a signed
+  // httpOnly cookie and spent once per page load, so its ceiling sits where
+  // ordinary use cannot reach it, while a stolen cookie replayed in a loop is
+  // still not free.
   const refreshLimiter = rateLimiter(config.http.refreshRateLimit);
 
   router.post(
     '/login',
-    loginLimiter,
     validate({ body: loginSchema }),
     asyncHandler(async (req, res) => {
       const { accessToken, refreshToken, user } = await service.login(req.body, { config });

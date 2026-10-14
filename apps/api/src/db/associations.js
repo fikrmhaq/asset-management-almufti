@@ -24,6 +24,21 @@ function applyAssociations(models) {
     Department,
     DepartmentPicAssignment,
     LocationPicAssignment,
+    PositionAssignment,
+    WorkflowDefinition,
+    WorkflowDefinitionStep,
+    Request,
+    RequestItem,
+    RequestStep,
+    RequestStepItemNote,
+    RequestDocument,
+    RequestItemUnit,
+    RequestItemUnitReceipt,
+    RequestCloseEvent,
+    RequestReceiptConfirmation,
+    AssetUnitReport,
+    Consumable,
+    ConsumableStockMovement,
     User,
     UserRole,
     RolePermission,
@@ -193,6 +208,11 @@ function applyAssociations(models) {
   Location.hasMany(Location, { as: 'children', foreignKey: 'parentLocationId' });
   Location.belongsTo(Institution, { as: 'institution', foreignKey: 'institutionId' });
   Institution.hasMany(Location, { as: 'locations', foreignKey: 'institutionId' });
+  // Migration 063 (REQ-REQUEST-023): the institution's Teacher Storage Room.
+  Institution.belongsTo(Location, {
+    as: 'teacherStorageLocation',
+    foreignKey: 'teacherStorageLocationId',
+  });
 
   // Person in charge — Phase 21 (`CR-003`). Responsibility and history only;
   // nothing in the authorization layer reads these (§5.4).
@@ -205,6 +225,131 @@ function applyAssociations(models) {
   User.hasMany(LocationPicAssignment, {
     as: 'locationPicAssignments',
     foreignKey: 'userId',
+  });
+
+  // School positions — Phase 35 (`CR-014`). Independent of both PIC tables: no
+  // association links a position to a PIC assignment, and nothing in the
+  // authorization layer reads these (`BR-028`).
+  PositionAssignment.belongsTo(Institution, { as: 'institution', foreignKey: 'institutionId' });
+  PositionAssignment.belongsTo(Department, { as: 'department', foreignKey: 'departmentId' });
+  Department.hasMany(PositionAssignment, {
+    as: 'positionAssignments',
+    foreignKey: 'departmentId',
+  });
+  PositionAssignment.belongsTo(User, { as: 'user', foreignKey: 'userId' });
+  PositionAssignment.belongsTo(User, { as: 'assigner', foreignKey: 'assignedBy' });
+  PositionAssignment.belongsTo(User, { as: 'ender', foreignKey: 'endedBy' });
+  User.hasMany(PositionAssignment, { as: 'positionAssignments', foreignKey: 'userId' });
+
+  // Workflow definitions — Phase 36 (`CR-014`). A step names a position CODE;
+  // nothing associates it with a PositionAssignment, because resolving the code
+  // to a person is execution (Phase 38), not configuration.
+  WorkflowDefinition.belongsTo(Institution, { as: 'institution', foreignKey: 'institutionId' });
+  WorkflowDefinition.belongsTo(User, { as: 'creator', foreignKey: 'createdBy' });
+  WorkflowDefinition.belongsTo(User, { as: 'publisher', foreignKey: 'publishedBy' });
+  WorkflowDefinition.hasMany(WorkflowDefinitionStep, { as: 'steps', foreignKey: 'definitionId' });
+  WorkflowDefinitionStep.belongsTo(WorkflowDefinition, {
+    as: 'definition',
+    foreignKey: 'definitionId',
+  });
+
+  // Requests — Phase 37 (`CR-014`). No association to assets or asset units:
+  // a request is optional and nothing links to it yet (the unit link is
+  // Phase 40).
+  Request.belongsTo(Institution, { as: 'institution', foreignKey: 'institutionId' });
+  Request.belongsTo(User, { as: 'requester', foreignKey: 'requesterUserId' });
+  Request.belongsTo(PositionAssignment, {
+    as: 'requesterAssignment',
+    foreignKey: 'requesterAssignmentId',
+  });
+  Request.belongsTo(Department, { as: 'requesterDepartment', foreignKey: 'requesterDepartmentId' });
+  Request.belongsTo(Department, { as: 'department', foreignKey: 'departmentId' });
+  Request.belongsTo(Location, { as: 'destination', foreignKey: 'destinationLocationId' });
+  Request.belongsTo(WorkflowDefinition, {
+    as: 'workflowDefinition',
+    foreignKey: 'workflowDefinitionId',
+  });
+  Request.hasMany(RequestItem, { as: 'items', foreignKey: 'requestId' });
+  RequestItem.belongsTo(Request, { as: 'request', foreignKey: 'requestId' });
+  RequestItem.belongsTo(MeasurementUnit, {
+    as: 'measurementUnit',
+    foreignKey: 'measurementUnitId',
+  });
+  RequestItem.belongsTo(AssetClassification, {
+    as: 'classification',
+    foreignKey: 'classificationId',
+  });
+
+  // Request steps — Phase 38. The actor assignment is who acted and in which
+  // capacity; it grants nothing (`BR-028`).
+  Request.hasMany(RequestStep, { as: 'steps', foreignKey: 'requestId' });
+  RequestStep.belongsTo(Request, { as: 'request', foreignKey: 'requestId' });
+  RequestStep.belongsTo(User, { as: 'actedBy', foreignKey: 'actedByUserId' });
+  RequestStep.belongsTo(PositionAssignment, {
+    as: 'actedAs',
+    foreignKey: 'actedAsAssignmentId',
+  });
+
+  // Request Revision — migration 059 (REQ-REQUEST-018). A revision decision's
+  // optional per-item notes; the item link is detached if the item is deleted.
+  RequestStep.hasMany(RequestStepItemNote, { as: 'itemNotes', foreignKey: 'requestStepId' });
+  RequestStepItemNote.belongsTo(RequestStep, { as: 'step', foreignKey: 'requestStepId' });
+  RequestStepItemNote.belongsTo(RequestItem, { as: 'item', foreignKey: 'requestItemId' });
+
+  // Request documents — Phase 39. Owned by the request; `Attachment` is
+  // unchanged (`CR-014` `DEC-O`).
+  Request.hasMany(RequestDocument, { as: 'documents', foreignKey: 'requestId' });
+  RequestDocument.belongsTo(Request, { as: 'request', foreignKey: 'requestId' });
+  RequestDocument.belongsTo(User, { as: 'uploader', foreignKey: 'uploadedBy' });
+
+  // Registration links — Phase 40. A unit fulfils at most one item
+  // (`uq_request_item_units_unit`), hence `hasOne` from the unit.
+  RequestItem.hasMany(RequestItemUnit, { as: 'links', foreignKey: 'requestItemId' });
+  RequestItemUnit.belongsTo(RequestItem, { as: 'item', foreignKey: 'requestItemId' });
+  RequestItemUnit.belongsTo(AssetUnit, { as: 'assetUnit', foreignKey: 'assetUnitId' });
+  AssetUnit.hasOne(RequestItemUnit, { as: 'requestItemLink', foreignKey: 'assetUnitId' });
+  RequestItemUnit.belongsTo(User, { as: 'linker', foreignKey: 'linkedBy' });
+
+  // Receipts and close events — Phase 41. Receipts are a link's history; at
+  // most one is active (`uq_riu_receipts_active`).
+  RequestItemUnit.hasMany(RequestItemUnitReceipt, {
+    as: 'receipts',
+    foreignKey: 'requestItemUnitId',
+  });
+  RequestItemUnitReceipt.belongsTo(RequestItemUnit, {
+    as: 'link',
+    foreignKey: 'requestItemUnitId',
+  });
+  RequestItemUnitReceipt.belongsTo(User, { as: 'recorder', foreignKey: 'recordedBy' });
+  RequestItemUnitReceipt.belongsTo(User, { as: 'reverser', foreignKey: 'reversedBy' });
+  Request.hasMany(RequestCloseEvent, { as: 'closeEvents', foreignKey: 'requestId' });
+  RequestCloseEvent.belongsTo(Request, { as: 'request', foreignKey: 'requestId' });
+  RequestCloseEvent.belongsTo(User, { as: 'closer', foreignKey: 'closedBy' });
+
+  // Receipt confirmations — migration 057. One per Record Receipt action: its
+  // receipts point here, and so do its photos (`CONFIRMATION_PHOTO` documents).
+  Request.hasMany(RequestReceiptConfirmation, {
+    as: 'receiptConfirmations',
+    foreignKey: 'requestId',
+  });
+  RequestReceiptConfirmation.belongsTo(Request, { as: 'request', foreignKey: 'requestId' });
+  RequestReceiptConfirmation.belongsTo(User, { as: 'confirmer', foreignKey: 'confirmedBy' });
+  RequestReceiptConfirmation.hasMany(RequestItemUnitReceipt, {
+    as: 'receipts',
+    foreignKey: 'receiptConfirmationId',
+  });
+  RequestItemUnitReceipt.belongsTo(RequestReceiptConfirmation, {
+    as: 'confirmation',
+    foreignKey: 'receiptConfirmationId',
+  });
+  RequestReceiptConfirmation.hasMany(RequestDocument, {
+    as: 'photos',
+    foreignKey: 'receiptConfirmationId',
+  });
+  // Migration 062 (REQ-REQUEST-022): the received unit a confirmation photo shows.
+  RequestDocument.belongsTo(RequestItemUnitReceipt, {
+    as: 'receipt',
+    foreignKey: 'requestItemUnitReceiptId',
   });
 
   LocationFloorPlan.belongsTo(Location, { as: 'location', foreignKey: 'locationId' });
@@ -241,6 +386,9 @@ function applyAssociations(models) {
   Department.hasMany(AssetUnit, { as: 'assetUnits', foreignKey: 'departmentId' });
   AssetUnit.belongsTo(Location, { as: 'currentLocation', foreignKey: 'currentLocationId' });
   Location.hasMany(AssetUnit, { as: 'assetUnits', foreignKey: 'currentLocationId' });
+  // Acquisition fact — migration 056, REQ-UNIT-012.
+  AssetUnit.belongsTo(FundingSource, { as: 'fundingSource', foreignKey: 'fundingSourceId' });
+  FundingSource.hasMany(AssetUnit, { as: 'assetUnits', foreignKey: 'fundingSourceId' });
   AssetUnit.belongsTo(User, { as: 'creator', foreignKey: 'createdBy' });
   AssetUnit.belongsTo(User, { as: 'updater', foreignKey: 'updatedBy' });
 
@@ -316,6 +464,29 @@ function applyAssociations(models) {
   Transaction.hasMany(TransactionItem, { as: 'items', foreignKey: 'transactionId' });
   TransactionItem.belongsTo(AssetUnit, { as: 'assetUnit', foreignKey: 'assetUnitId' });
   AssetUnit.hasMany(TransactionItem, { as: 'transactionItems', foreignKey: 'assetUnitId' });
+
+  // Migration 066 (REQ-REQUEST-025): a Room PIC's report about one unit.
+  AssetUnitReport.belongsTo(AssetUnit, { as: 'assetUnit', foreignKey: 'assetUnitId' });
+  AssetUnitReport.belongsTo(User, { as: 'reporter', foreignKey: 'reporterId' });
+  AssetUnitReport.belongsTo(User, { as: 'reviewer', foreignKey: 'reviewedBy' });
+  AssetUnitReport.belongsTo(LongitudinalHistory, { as: 'history', foreignKey: 'historyId' });
+
+  // Migration 067 (§73): consumables, their stock movements, and the request
+  // lines that name one.
+  Consumable.belongsTo(Institution, { as: 'institution', foreignKey: 'institutionId' });
+  Consumable.belongsTo(MeasurementUnit, {
+    as: 'measurementUnit',
+    foreignKey: 'measurementUnitId',
+  });
+  Consumable.hasMany(ConsumableStockMovement, { as: 'movements', foreignKey: 'consumableId' });
+  ConsumableStockMovement.belongsTo(Consumable, { as: 'consumable', foreignKey: 'consumableId' });
+  ConsumableStockMovement.belongsTo(User, { as: 'actor', foreignKey: 'createdBy' });
+  ConsumableStockMovement.belongsTo(RequestItem, {
+    as: 'requestItem',
+    foreignKey: 'requestItemId',
+  });
+  RequestItem.belongsTo(Consumable, { as: 'consumable', foreignKey: 'consumableId' });
+  RequestItem.hasMany(ConsumableStockMovement, { as: 'issues', foreignKey: 'requestItemId' });
 
   // `audit.audit_logs.actor_id` has no association: the DDL defines no foreign
   // key, so there is no referential relationship to model.

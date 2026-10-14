@@ -56,8 +56,13 @@ class UnauthorizedError extends AppError {
 
 /** Authenticated, but lacking permission or outside the caller's org scope. */
 class ForbiddenError extends AppError {
-  constructor(message = 'You do not have permission to perform this action') {
-    super('FORBIDDEN', message);
+  /**
+   * `details` is optional and names the specific reason where one exists — e.g.
+   * a refused self-assignment (`CR-014` `BR-033`). The error code stays
+   * `FORBIDDEN`; no new top-level code is introduced.
+   */
+  constructor(message = 'You do not have permission to perform this action', details) {
+    super('FORBIDDEN', message, { details });
   }
 }
 

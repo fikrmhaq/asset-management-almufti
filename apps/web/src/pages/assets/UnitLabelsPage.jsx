@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Printer } from 'lucide-react';
@@ -25,24 +25,54 @@ import { UnitLabelSheet } from '@/components/asset/UnitLabel';
 export function UnitLabelsPage() {
   const { t } = useTranslation();
   const { id: assetId, unitId } = useParams();
+  const [search] = useSearchParams();
 
-  // `unitId` present → one label. Absent → every unit of the asset.
+  // `unitId` present → one label. `assetId` → every unit of the asset. Neither
+  // (`/asset-units/labels?ids=…`, §73) → the units selected in the unit list,
+  // each with the very label it has on its own.
   const single = Boolean(unitId);
+  const selected = assetId
+    ? null
+    : (search.get('ids') ?? '')
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean);
 
   const query = useQuery({
     queryKey: single
       ? queryKeys.assetUnits.sub(unitId, 'label')
-      : queryKeys.assets.sub(assetId, 'unit-labels'),
-    queryFn: async () =>
-      single ? [await assetUnitsApi.label(unitId)] : (await assetsApi.unitLabels(assetId)).data,
+      : selected
+        ? ['asset-units', 'labels', selected]
+        : queryKeys.assets.sub(assetId, 'unit-labels'),
+    queryFn: async () => {
+      if (single) return [await assetUnitsApi.label(unitId)];
+      if (selected) return assetUnitsApi.labels(selected);
+      return (await assetsApi.unitLabels(assetId)).data;
+    },
+    enabled: !selected || selected.length > 0,
   });
 
   const labels = query.data ?? [];
 
+  if (selected && selected.length === 0) {
+    return (
+      <ListPage title={t('assets.label.title')} surface={false}>
+        <EmptyState
+          title={t('assets.label.noSelectionTitle')}
+          description={t('assets.label.noSelectionDescription')}
+        />
+      </ListPage>
+    );
+  }
+
   return (
     <ListPage
       title={t('assets.label.title')}
-      description={t(single ? 'assets.label.descriptionOne' : 'assets.label.descriptionMany')}
+      description={
+        selected
+          ? t('assets.label.descriptionSelected', { count: selected.length })
+          : t(single ? 'assets.label.descriptionOne' : 'assets.label.descriptionMany')
+      }
       actions={
         labels.length > 0 ? (
           <Button className="no-print" onClick={() => window.print()}>

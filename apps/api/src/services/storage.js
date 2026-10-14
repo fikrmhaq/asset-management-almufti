@@ -39,6 +39,13 @@ const ALLOWED_MIME_TYPES = Object.freeze([
 const FLOOR_PLAN_MIME_TYPES = Object.freeze(['image/jpeg', 'image/png']);
 
 /**
+ * Receipt-confirmation photos (migration 057): JPG or PNG only — by type AND
+ * by extension, so a `.pdf` name cannot pass as an image.
+ */
+const PHOTO_MIME_TYPES = Object.freeze(['image/jpeg', 'image/png']);
+const PHOTO_EXTENSIONS = Object.freeze(['jpg', 'jpeg', 'png']);
+
+/**
  * Strips everything that could escape the storage directory.
  *
  * The original name is caller-controlled and ends up in a path, so `..`, slashes
@@ -61,13 +68,21 @@ function extensionOf(fileName) {
 /**
  * @throws {ValidationError} when the type is not allowed (REQ-FILE-004)
  */
-function assertAllowedType(file, { mimeTypes = ALLOWED_MIME_TYPES, label = 'file' } = {}) {
+function assertAllowedType(
+  file,
+  {
+    mimeTypes = ALLOWED_MIME_TYPES,
+    extensions = ALLOWED_EXTENSIONS,
+    label = 'file',
+    field = 'file',
+  } = {}
+) {
   const extension = extensionOf(file.originalname);
 
-  if (!ALLOWED_EXTENSIONS.includes(extension) || !mimeTypes.includes(file.mimetype)) {
+  if (!extensions.includes(extension) || !mimeTypes.includes(file.mimetype)) {
     throw new ValidationError(`That ${label} type is not allowed`, [
       {
-        field: 'file',
+        field,
         issue: `must be one of: ${mimeTypes.join(', ')}`,
       },
     ]);
@@ -166,6 +181,8 @@ module.exports = {
   ALLOWED_EXTENSIONS,
   ALLOWED_MIME_TYPES,
   FLOOR_PLAN_MIME_TYPES,
+  PHOTO_MIME_TYPES,
+  PHOTO_EXTENSIONS,
   sanitizeFileName,
   extensionOf,
   assertAllowedType,

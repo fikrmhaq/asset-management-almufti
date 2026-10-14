@@ -10,7 +10,7 @@ import { queryKeys } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/dates';
 import { Button } from '@/components/ui/button';
 import { Input, Textarea } from '@/components/ui/input';
-import { StatusBadge } from '@/components/ui/badge';
+import { Badge, StatusBadge } from '@/components/ui/badge';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { toast } from '@/components/ui/toast';
 import { Field } from '@/components/form/field';
@@ -23,6 +23,7 @@ import {
   DetailTabs,
   SectionCard,
 } from '@/components/patterns/page';
+import { AttachmentsPanel } from '@/components/asset/AttachmentsPanel';
 import { LocationPathFor, useLocationContext } from '@/components/location/LocationPath';
 import { LocationSelector } from '@/components/location/LocationSelector';
 import { useContractItemOptions } from '../procurement/referenceOptions';
@@ -115,6 +116,15 @@ function HistoryTab({ unitId, canRecord }) {
               <div className="flex flex-wrap items-center gap-2">
                 {row.lifecycleState ? <StatusBadge value={row.lifecycleState} /> : null}
                 {row.condition ? <StatusBadge value={row.condition} /> : null}
+                {/* REQ-REQUEST-024: written by receipt placement — a location,
+                    never an assessment, so it carries no condition. */}
+                {row.entryType === 'SYSTEM' ? (
+                  <Badge variant="neutral">{t('units.history.systemPlacement')}</Badge>
+                ) : null}
+                {/* REQ-REQUEST-025: a Room PIC's report, confirmed by a reviewer. */}
+                {row.entryType === 'REPORT' ? (
+                  <Badge variant="neutral">{t('units.history.fromReport')}</Badge>
+                ) : null}
                 <span className="text-xs text-muted-foreground">
                   {formatDate(row.effectiveFrom?.slice(0, 10))}
                   {row.effectiveTo
@@ -430,6 +440,7 @@ export function AssetUnitDetailPage() {
   const canEditAttributes = usePermission('asset-attribute-value:update');
   const canReadBorrowings = usePermission('borrowing:read');
   const canReadTransactions = usePermission('transaction:read');
+  const canReadAttachments = usePermission('attachment:read');
   const { isPicScoped } = usePicScope();
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState('');
@@ -561,7 +572,34 @@ export function AssetUnitDetailPage() {
                 <span className="text-muted-foreground">{t('units.fields.noDepartment')}</span>
               )}
             </DetailField>
+            {/*
+              REQ-UNIT-012: the unit's OWN funding source, when it recorded one.
+              A unit bought under a contract without recording one shows
+              nothing here — its funding is the contract's, read there.
+            */}
+            {unit.fundingSource ? (
+              <DetailField label={t('units.fields.fundingSource')}>
+                {unit.fundingSource.code
+                  ? `${unit.fundingSource.name} (${unit.fundingSource.code})`
+                  : unit.fundingSource.name}
+              </DetailField>
+            ) : null}
             <DetailField label={t('common.fields.description')}>{unit.description}</DetailField>
+            {/*
+              Phase 40 (`CR-014` D7): the Request this unit was registered
+              against — present only when the viewer can see that Request.
+            */}
+            {unit.requestItem ? (
+              <DetailField label={t('units.fields.requestedVia')}>
+                <Link
+                  to={`/requests/${unit.requestItem.requestId}`}
+                  className="text-brand-600 hover:underline"
+                >
+                  {unit.requestItem.requestNumber}
+                </Link>{' '}
+                <span className="text-muted-foreground">— {unit.requestItem.description}</span>
+              </DetailField>
+            ) : null}
             <DetailField label={t('units.fields.procurementItem')}>
               <ProcurementItem
                 contractItemId={unit.contractItemId}
@@ -594,6 +632,20 @@ export function AssetUnitDetailPage() {
       content: <HistoryTab unitId={unitId} canRecord={canRecord} />,
     },
   ];
+
+  // REQ-REQUEST-020: this unit's own files, registration photos among them —
+  // the asset's list narrowed to the unit. Asset-level files stay on the asset.
+  if (canReadAttachments) {
+    tabs.push({
+      value: 'attachments',
+      label: t('units.tabs.attachments'),
+      content: (
+        <SectionCard title={t('units.tabs.attachments')}>
+          <AttachmentsPanel assetId={assetId} assetUnitId={unitId} />
+        </SectionCard>
+      ),
+    });
+  }
 
   // Only offered when the caller can actually read them — the tab would 403.
   if (canReadBorrowings) {

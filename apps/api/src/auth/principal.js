@@ -234,6 +234,30 @@ async function toPublicProfile(principal, { models = getModels() } = {}) {
           })
         ).map((row) => ({ id: row.id, code: row.code, name: row.name }));
 
+  /**
+   * The school positions this user currently holds — Phase 35 (`CR-014`
+   * §12.1). Read HERE, for the profile only, and never by `resolvePrincipal`: a
+   * position grants no permission and no record reach (`BR-028`), so it has no
+   * place in the object every authorization decision is made from. Like
+   * `picDepartments`, it needs no permission — a user may always see what they
+   * hold. Queried directly rather than through `domain/positionAssignments`,
+   * which itself depends on this module.
+   */
+  const positionAssignments = (
+    await models.PositionAssignment.findAll({
+      where: { userId: principal.userId, isCurrent: true },
+      include: [{ association: 'department', attributes: ['id', 'code', 'name'] }],
+      order: [['assignedAt', 'ASC']],
+    })
+  ).map((row) => ({
+    id: row.id,
+    positionCode: row.positionCode,
+    institutionId: row.institutionId,
+    department: row.department
+      ? { id: row.department.id, code: row.department.code, name: row.department.name }
+      : null,
+  }));
+
   return {
     id: principal.userId,
     username: principal.username,
@@ -243,6 +267,7 @@ async function toPublicProfile(principal, { models = getModels() } = {}) {
     isSystemWide: principal.isSystemWide,
     isPicScoped: principal.isPicScoped ?? false,
     picDepartments,
+    positionAssignments,
   };
 }
 

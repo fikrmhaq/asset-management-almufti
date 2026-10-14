@@ -42,7 +42,11 @@ const { getSequelize } = require('../../db/sequelize');
 const { toFindOptions, paginate } = require('../../query/listQuery');
 const { activeStatus, containsAny, dateRange, equals } = require('../../query/filtering');
 const { organizationScope } = require('../../auth/principal');
-const { assertCanAssignInstitution, unitScopeFilter } = require('../../domain/scope');
+const {
+  assertCanAssignInstitution,
+  unitScopeFilter,
+  unitDepartmentScope,
+} = require('../../domain/scope');
 const { descendantIds } = require('../../domain/locationRules');
 const { resolveMonth, formatMonth } = require('../../domain/businessMonth');
 const {
@@ -675,7 +679,8 @@ async function assessmentCoverage(params, principal, options = {}) {
  * reported instead is whether anyone has looked at them at all.
  */
 async function unassignedUnits({ institutionId, month, principal, sequelize }) {
-  if (organizationScope(principal).picScoped) return null;
+  // Any department-narrowed caller — PIC, or a Kajur / Toolman (P3, §64.3).
+  if (unitDepartmentScope(principal)) return null;
 
   const bind = binder();
   const institution = bind.add(institutionId);
@@ -1229,7 +1234,14 @@ async function maintenanceHistoryFor(rows, months, models) {
         effectiveFrom: { [Op.lt]: windowEnd },
         [Op.or]: [{ effectiveTo: null }, { effectiveTo: { [Op.gt]: windowStart } }],
       },
-      attributes: ['assetUnitId', 'condition', 'description', 'effectiveFrom', 'effectiveTo'],
+      attributes: [
+        'assetUnitId',
+        'condition',
+        'description',
+        'entryType',
+        'effectiveFrom',
+        'effectiveTo',
+      ],
       order: [['effectiveFrom', 'ASC']],
     }),
     /**
@@ -1274,13 +1286,16 @@ async function maintenanceHistoryFor(rows, months, models) {
         /**
          * Notes are OBSERVATIONS RECORDED THIS MONTH, never the carried-forward
          * snapshot's text — repeating a note from three months ago in every
-         * column since is not a record of anything.
+         * column since is not a record of anything. A `SYSTEM` row (receipt
+         * placement, REQ-REQUEST-024) is no observation at all: excluded by
+         * what wrote it, not by the shape of its text.
          */
         const notes = unitPeriods
           .filter(
             (period) =>
               period.effectiveFrom >= start &&
               period.effectiveFrom < end &&
+              period.entryType !== 'SYSTEM' &&
               !isMachineWritten(period.description) &&
               !isPlaceholder(period.description)
           )
@@ -1542,4 +1557,8 @@ module.exports = {
   borrowings,
   procurementTraceability,
   resolveInstitution,
+  // The PERAWATAN month snapshots, exposed for the tests that hold its notes
+  // to observations only (REQ-REQUEST-024).
+  maintenanceHistoryFor,
+  monthWindow,
 };

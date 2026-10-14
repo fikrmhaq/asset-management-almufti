@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { visibleNavigation } from '@/navigation';
 import { useSessionStore } from '@/stores/session';
 import { BrandMark } from './BrandMark';
+import { NavCountBadge } from './NavCountBadge';
 
 /**
  * Sidebar — `07-ui.md` §3, `IMPLEMENTATION_PLAN.md` §16.3.
@@ -122,6 +123,9 @@ export function Sidebar({ collapsed = false, onNavigate }) {
                           <span className={cn('truncate', collapsed && 'sr-only')}>
                             {t(item.labelKey)}
                           </span>
+                          {item.badge ? (
+                            <NavCountBadge source={item.badge} collapsed={collapsed} />
+                          ) : null}
                         </>
                       )}
                     </NavLink>

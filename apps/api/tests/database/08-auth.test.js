@@ -10,12 +10,9 @@ import { mainDatabaseUrl, query } from './helpers/db.js';
 // this wins over `.env`.
 process.env.DATABASE_URL = mainDatabaseUrl();
 
-// Lift the rate limits for the shared app. Every test here logs in from the
-// same address, so the production ceiling of 10 attempts per window would trip
-// partway through and turn later assertions into unexplained 429s. The limiter
-// itself is exercised deliberately in "login rate limiting" below and in
-// tests/app.test.js — this only stops it drowning out everything else.
-process.env.AUTH_RATE_LIMIT_MAX = '10000';
+// Lift the global rate limit for the shared app. Every test here calls the API
+// from the same address, so the ceiling would trip partway through and turn
+// later assertions into unexplained 429s.
 process.env.RATE_LIMIT_MAX = '10000';
 
 const require = createRequire(import.meta.url);
@@ -316,20 +313,18 @@ describe('POST /auth/logout (REQ-AUTH-003)', () => {
   });
 });
 
-describe('login rate limiting (§12.3, REQ-NFR-SEC-004)', () => {
-  it('stops repeated password attempts at the configured auth ceiling', async () => {
-    // A separate app with the real, strict ceiling — the shared app above runs
-    // with the limiter lifted so it does not interfere with the other tests.
+describe('login is not rate-limited', () => {
+  it('keeps answering repeated attempts with 401, never 429', async () => {
+    // A separate app with a tiny global ceiling that login must not count against.
     const limited = createApp({
-      config: loadConfig({ ...process.env, AUTH_RATE_LIMIT_MAX: '3' }),
+      config: loadConfig({ ...process.env, RATE_LIMIT_MAX: '3' }),
       logger: Object.assign(createLogger(config), { silent: true }),
     });
 
     await createUser({ username: 'target' });
 
     const attempts = [];
-    for (let i = 0; i < 4; i += 1) {
-      // Sequential on purpose: a rate limiter's behaviour depends on order.
+    for (let i = 0; i < 15; i += 1) {
       attempts.push(
         await request(limited).post(`${AUTH}/login`).send({
           username: 'target',
@@ -338,9 +333,7 @@ describe('login rate limiting (§12.3, REQ-NFR-SEC-004)', () => {
       );
     }
 
-    expect(attempts.slice(0, 3).every((response) => response.status === 401)).toBe(true);
-    expect(attempts[3].status).toBe(429);
-    expect(attempts[3].body.error.code).toBe('RATE_LIMITED');
+    expect(attempts.every((response) => response.status === 401)).toBe(true);
   });
 });
 

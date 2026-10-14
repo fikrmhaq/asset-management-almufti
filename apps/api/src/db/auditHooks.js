@@ -79,6 +79,34 @@ const AUDITED_MODELS = Object.freeze([
   // Operations
   'Borrowing',
   'BorrowingItem',
+  // Requests — Phase 36 (`CR-014`). The steps are audited in their own right
+  // (Phase 36 decision D3): a DRAFT's steps are replaced in place, so neither
+  // table is its own history.
+  'WorkflowDefinition',
+  'WorkflowDefinitionStep',
+  // Phase 37: requests and their items (`04-data-model.md` §5.7.3).
+  'Request',
+  'RequestItem',
+  // Phase 38: each step state change has a before / after record.
+  'RequestStep',
+  // Migration 059: revision item notes — the create, and the detach when the
+  // requester deletes the item during the revision.
+  'RequestStepItemNote',
+  // Phase 39: request documents — create and delete (`storageReference` redacted).
+  'RequestDocument',
+  // Phase 40: registration links — each link and each unlink.
+  'RequestItemUnit',
+  // Phase 41: receipts (the create and the reversal) and close events.
+  'RequestItemUnitReceipt',
+  'RequestCloseEvent',
+  // Migration 057: receipt confirmations (create only — never updated).
+  'RequestReceiptConfirmation',
+  // Migration 066 (REQ-REQUEST-025): unit reports — the report, and its review.
+  'AssetUnitReport',
+  // Migration 067 (§73): consumables, and every stock movement — receipt,
+  // issue, adjustment (create only; a movement is never changed).
+  'Consumable',
+  'ConsumableStockMovement',
 ]);
 
 /**

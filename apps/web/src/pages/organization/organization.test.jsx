@@ -230,9 +230,94 @@ describe('DepartmentsPage', () => {
     const dialog = screen.getByRole('dialog');
     await userEvent.type(within(dialog).getByLabelText(/code/i), 'DEP-02');
     await userEvent.type(within(dialog).getByLabelText(/name/i), 'Keuangan');
+    // The default harness session is system-wide, so an institution must be
+    // chosen — see the suite below for why.
+    await userEvent.selectOptions(within(dialog).getByLabelText(/institution/i), INSTITUTION.id);
     await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
 
-    await waitFor(() => expect(create).toHaveBeenCalledWith({ code: 'DEP-02', name: 'Keuangan' }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({
+        code: 'DEP-02',
+        name: 'Keuangan',
+        institutionId: INSTITUTION.id,
+      })
+    );
+  });
+
+  /**
+   * The institution on a new department — `CR-003` §4.3, REQ-ORG-003.
+   *
+   * `POST /departments` always accepted `institutionId`, and the form never
+   * offered it. For an institution-scoped administrator that was invisible: the
+   * server fills in their own. For a SYSTEM-WIDE caller there is nothing to fill
+   * in, so every department they created was UNASSIGNED — unable to hold an
+   * asset unit, and unrepairable, because `institutionId` is not updatable
+   * (`CR-003` OPEN-6). The dead end was silent, which is what made it a bug
+   * rather than a limitation.
+   */
+  describe('choosing the institution', () => {
+    it('refuses to submit when a system-wide caller has not chosen one', async () => {
+      const create = vi.spyOn(organizationApi.departmentsApi, 'create').mockResolvedValue({});
+      renderScreen(<DepartmentsPage />);
+      await screen.findByText('Umum');
+
+      await userEvent.click(screen.getByRole('button', { name: /new department/i }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.type(within(dialog).getByLabelText(/code/i), 'DEP-03');
+      await userEvent.type(within(dialog).getByLabelText(/name/i), 'Umum 2');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+      // Nothing is sent, and the reason names the field rather than failing at
+      // the server with a department already created.
+      await waitFor(() =>
+        expect(within(dialog).getByText(/not scoped to one institution/i)).toBeInTheDocument()
+      );
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * An institution-scoped administrator has exactly one, and the server
+     * applies it. Sending it from the client would be the same value by a
+     * longer route; omitting it is what `defaultInstitutionFor` expects.
+     */
+    it('omits it for an institution-scoped caller, who is not asked', async () => {
+      signInWith(ALL, { institutionId: INSTITUTION.id, isSystemWide: false });
+
+      const create = vi.spyOn(organizationApi.departmentsApi, 'create').mockResolvedValue({});
+      renderScreen(<DepartmentsPage />);
+      await screen.findByText('Umum');
+
+      await userEvent.click(screen.getByRole('button', { name: /new department/i }));
+      const dialog = screen.getByRole('dialog');
+      await userEvent.type(within(dialog).getByLabelText(/code/i), 'DEP-04');
+      await userEvent.type(within(dialog).getByLabelText(/name/i), 'Keuangan');
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
+
+      await waitFor(() =>
+        expect(create).toHaveBeenCalledWith({
+          code: 'DEP-04',
+          name: 'Keuangan',
+          institutionId: undefined,
+        })
+      );
+    });
+
+    /**
+     * `CR-003` is explicit that a role which should reach less must not be
+     * handed the institution list to make a control work.
+     */
+    it('does not show the field to a caller without institution:read', async () => {
+      signInWith(['department:read', 'department:create'], { institutionId: INSTITUTION.id });
+
+      renderScreen(<DepartmentsPage />);
+      await screen.findByText('Umum');
+
+      await userEvent.click(screen.getByRole('button', { name: /new department/i }));
+
+      expect(
+        within(screen.getByRole('dialog')).queryByLabelText(/institution/i)
+      ).not.toBeInTheDocument();
+    });
   });
 });
 

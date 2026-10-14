@@ -46,17 +46,16 @@ function corsPolicy({ corsOrigins }) {
 /**
  * Request-layer rate limiting (REQ-NFR-SEC-004).
  *
- * This is the baseline for the whole API. Auth endpoints get their own,
- * stricter limiter in Phase 3 — `05-infrastructure.md` §12.3 calls them out
- * specifically, and a limit loose enough for browsing assets is far too loose
- * for password attempts.
+ * This is the baseline for the whole API. Login is exempt (see `app.js`).
  *
  * @param {{windowMs: number, max: number}} rateLimitConfig
+ * @param {{skip?: (req: import('express').Request) => boolean}} [options]
  */
-function rateLimiter({ windowMs, max }) {
+function rateLimiter({ windowMs, max }, { skip } = {}) {
   return rateLimit({
     windowMs,
     max,
+    ...(skip ? { skip } : {}),
     standardHeaders: true,
     legacyHeaders: false,
     // Emit the documented error envelope rather than express-rate-limit's default.

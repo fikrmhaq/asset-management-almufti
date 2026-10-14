@@ -30,7 +30,7 @@
  * which interpolates nothing but server-computed `Date` values.
  */
 
-const { organizationScope } = require('../auth/principal');
+const { unitDepartmentScope } = require('./scope');
 
 /**
  * Lifecycle states that put a unit beyond assessment — `CR-012` `DEC-J`.
@@ -86,10 +86,9 @@ function binder() {
  * @returns {string[]|null}
  */
 function unitScopeDepartmentIds(principal) {
-  const scope = organizationScope(principal);
-  if (!scope.picScoped) return null;
-
-  return [...(scope.picDepartmentIds ?? [])];
+  // PIC scope, or a Kajur / Toolman operating scope (P3, §64.3) — one set.
+  const departments = unitDepartmentScope(principal);
+  return departments ? [...departments] : null;
 }
 
 /**

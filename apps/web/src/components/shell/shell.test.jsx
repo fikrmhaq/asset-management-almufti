@@ -58,6 +58,8 @@ describe('navigation model', () => {
       'nav.groups.procurement',
       'nav.groups.operations',
       'nav.groups.organization',
+      // Phase 37 (`CR-014`): `07-ui.md` §2 places Requests after Organization.
+      'nav.groups.requests',
       'nav.groups.reportsAudit',
     ]);
 

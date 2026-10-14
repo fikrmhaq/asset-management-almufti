@@ -164,18 +164,27 @@ async function buildAttributeValues(
   return rows;
 }
 
-/** Turns stored rows into `{definitionId, value}` pairs for a response. */
+/**
+ * Turns a definition and its stored row (or none) into the response entry.
+ *
+ * `isRequired` and `measurementUnitName` (REQ-REQUEST-021) are additions: the
+ * form marks required inputs and shows the unit beside a number. The unit name
+ * needs the definition loaded with its `measurementUnit` association; without
+ * it the name is null, never guessed.
+ */
 function serializeValue(row, definition) {
   const column = VALUE_COLUMN[definition?.attributeType ?? 'TEXT'];
 
   return {
-    attributeDefinitionId: row.attributeDefinitionId,
+    attributeDefinitionId: row?.attributeDefinitionId ?? definition?.id ?? null,
     name: definition?.name ?? null,
     attributeType: definition?.attributeType ?? null,
     scope: definition?.scope ?? null,
+    isRequired: Boolean(definition?.isRequired),
     measurementUnitId: definition?.measurementUnitId ?? null,
+    measurementUnitName: definition?.measurementUnit?.name ?? null,
     // NUMERIC arrives from the driver as a string to preserve precision.
-    value: row[column] ?? null,
+    value: row ? (row[column] ?? null) : null,
   };
 }
 

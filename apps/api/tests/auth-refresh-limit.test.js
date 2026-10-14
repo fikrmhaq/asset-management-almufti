@@ -16,20 +16,16 @@ import { buildTestApp } from './helpers/testApp.js';
  * by a signed httpOnly cookie — there is nothing to guess — and is spent by
  * ordinary navigation.
  *
- * The config is INJECTED with a deliberately tiny login ceiling, because that is
- * the only way this test can fail against the old code. The database suite sets
- * `AUTH_RATE_LIMIT_MAX=10000` so its own logins are never throttled, which would
- * make a test there pass whether or not the limiters were separate.
+ * Login itself is no longer rate-limited at all (removed by request), and is
+ * exempt from the app-wide limiter too.
  */
 
 const V1 = '/api/v1';
 
-/** A login ceiling of 2, and a refresh ceiling well above it. */
+/** A refresh ceiling the tests below can reach. */
 const app = () =>
   buildTestApp({
     env: {
-      AUTH_RATE_LIMIT_MAX: '2',
-      AUTH_RATE_LIMIT_WINDOW_MS: '900000',
       REFRESH_RATE_LIMIT_MAX: '25',
       REFRESH_RATE_LIMIT_WINDOW_MS: '900000',
     },
@@ -52,19 +48,21 @@ describe('refresh is not behind the login limiter', () => {
     expect(statuses).not.toContain(429);
   });
 
-  it('still throttles login at its own ceiling', async () => {
-    const server = app();
+  it('never throttles login, even past the global ceiling', async () => {
+    // A global ceiling of 2, so anything that still counted login would trip.
+    const server = buildTestApp({ env: { RATE_LIMIT_MAX: '2' } });
 
     const statuses = [];
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const response = await request(server)
         .post(`${V1}/auth/login`)
-        .send({ username: 'nobody', password: 'wrong-password' });
+        .send({ username: '', password: '' });
       statuses.push(response.status);
     }
 
-    // The control that makes password guessing impractical is untouched.
-    expect(statuses).toContain(429);
+    // Empty credentials fail validation (400) before touching the database —
+    // the point is that none of them is a 429.
+    expect(statuses).not.toContain(429);
   });
 
   it('throttles refresh eventually, so a replayed cookie is not free', async () => {

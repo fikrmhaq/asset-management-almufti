@@ -8,6 +8,10 @@
  * storage-adapter swap (`05-infrastructure.md` §5.1).
  *
  * Attaches to an Asset always, and optionally narrows to one of its Units.
+ *
+ * `purpose` (migration 061, REQ-REQUEST-020): NULL for an ordinary attachment;
+ * `REGISTRATION_PHOTO` for a JPG / PNG of what was registered against a request
+ * item (`domain/attachmentPurposes.js`).
  */
 module.exports = (sequelize, DataTypes) =>
   sequelize.define(
@@ -21,6 +25,7 @@ module.exports = (sequelize, DataTypes) =>
       fileSize: { type: DataTypes.BIGINT, allowNull: false },
       storageReference: { type: DataTypes.TEXT, allowNull: false },
       uploadedBy: { type: DataTypes.UUID, allowNull: false },
+      purpose: { type: DataTypes.STRING(30), allowNull: true },
     },
     { schema: 'public', tableName: 'attachments', updatedAt: false }
   );

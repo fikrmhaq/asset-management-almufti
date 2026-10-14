@@ -20,6 +20,10 @@ import { Alert } from '@/components/ui/alert';
  * makes "this attribute was cleared" expressible at all, and it is the only
  * shape that lets the server enforce required attributes.
  *
+ * `lockedIds` (REQ-REQUEST-021) shows those values read-only, with `lockedHint`
+ * beneath — the registration dialog's "fill blanks, never overwrite". A locked
+ * value is still part of `values`, so a whole-set save carries it unchanged.
+ *
  * `SELECTION` renders as free text, with the limitation stated. `GAP-001`: the
  * data model has nowhere to store an option list, so there is no set of allowed
  * values to render a dropdown from. Rendering an empty dropdown, or inventing
@@ -91,6 +95,8 @@ export function AttributeValueForm({
   onChange,
   errors = {},
   disabled = false,
+  lockedIds = [],
+  lockedHint,
 }) {
   const { t } = useTranslation();
 
@@ -102,6 +108,7 @@ export function AttributeValueForm({
     <div className="grid gap-4 sm:grid-cols-2">
       {definitions.map((definition) => {
         const id = definition.attributeDefinitionId;
+        const locked = lockedIds.includes(id);
 
         return (
           <Field
@@ -110,9 +117,11 @@ export function AttributeValueForm({
             required={definition.isRequired}
             error={errors[id]}
             hint={
-              definition.attributeType === 'SELECTION'
-                ? t('assets.attributes.selectionHint')
-                : undefined
+              locked
+                ? lockedHint
+                : definition.attributeType === 'SELECTION'
+                  ? t('assets.attributes.selectionHint')
+                  : undefined
             }
           >
             {(fieldProps) => (
@@ -121,7 +130,7 @@ export function AttributeValueForm({
                 value={values[id]}
                 onChange={(next) => onChange({ ...values, [id]: next })}
                 fieldProps={fieldProps}
-                disabled={disabled}
+                disabled={disabled || locked}
               />
             )}
           </Field>

@@ -10,10 +10,7 @@ import {
   resetOrganizationData,
 } from './helpers/apiClient.js';
 import { seed } from './helpers/db.js';
-import {
-  getCatalog,
-  PIC_ALLOWED_PERMISSIONS,
-} from '../../src/auth/permissionCatalog.js';
+import { getCatalog, PIC_ALLOWED_PERMISSIONS } from '../../src/auth/permissionCatalog.js';
 
 /**
  * The PIC permission ceiling — `CR-004` §1.2, §2, REQ-AUTHZ-008.
@@ -120,11 +117,37 @@ describe('the allow-set is exactly what CR-004 §2 specifies', () => {
   // institution's inventory codes is an administration act, not something a
   // Department PIC does — and this count is exactly the mechanism that made
   // their addition visible rather than silent.
-  it('leaves 86 codes forbidden, and publishes the flag on the catalog', () => {
+  //
+  // 90 since Phase 35 (`CR-014`) added `school-position:read` and
+  // `position-assignment:read` / `:create` / `:end`. All four are outside the
+  // ceiling by decision (`CR-014` `DEC-P`): the allow-set above is unchanged at 30.
+  //
+  // 94 since Phase 36 added `workflow-definition:read` / `:create` / `:update` /
+  // `:publish`, all outside the ceiling by the same decision.
+  //
+  // 101 since Phase 37 added the seven request codes (`request:read` / `:create` /
+  // `:update` / `:oversee`, `request-item:create` / `:update` / `:delete`) — none
+  // in the ceiling (`CR-014` `DEC-P`, Phase 37 decision E2).
+  //
+  // 105 since Phase 38 added `request:submit`, `request:cancel`,
+  // `request-step:decide` and `request-step:complete` — none in the ceiling.
+  //
+  // 108 since Phase 39 added `request-document:read` / `:create` / `:delete` —
+  // none in the ceiling.
+  //
+  // 112 since Phase 40 added `request-item:register` and
+  // `request-item-unit:read` / `:create` / `:delete` — none in the ceiling.
+  //
+  // 115 since Phase 41 added `request:receive`, `request:close` and
+  // `request-receipt:reverse` — none in the ceiling. 117 since REQ-REQUEST-023
+  // added `teacher-storage-room:read` and `:update`, outside it too. 119 since
+  // REQ-REQUEST-025 added `asset-unit-report:create` and `:review` — outside.
+  // 124 since §73 added the five `consumable:*` codes — outside.
+  it('leaves 124 codes forbidden, and publishes the flag on the catalog', () => {
     const catalog = getCatalog();
 
     expect(catalog.filter((entry) => entry.picAllowed)).toHaveLength(30);
-    expect(catalog.filter((entry) => !entry.picAllowed)).toHaveLength(86);
+    expect(catalog.filter((entry) => !entry.picAllowed)).toHaveLength(124);
   });
 
   /**
@@ -160,6 +183,29 @@ describe('the allow-set is exactly what CR-004 §2 specifies', () => {
       'permission:read',
       'report:read',
       'audit-log:read',
+      // Phase 35 (`CR-014` `DEC-P`): deciding who holds a school post is an
+      // institution-scoped act.
+      'school-position:read',
+      'position-assignment:read',
+      'position-assignment:create',
+      'position-assignment:end',
+      // Phase 36 (`CR-014` `DEC-P`): configuring workflows likewise.
+      'workflow-definition:read',
+      'workflow-definition:create',
+      'workflow-definition:update',
+      'workflow-definition:publish',
+      // Phase 37 (`CR-014` `DEC-P`): requests.
+      'request:read',
+      'request:create',
+      'request:update',
+      'request:oversee',
+      'request-item:create',
+      'request-item:update',
+      'request-item:delete',
+      'request:submit',
+      'request:cancel',
+      'request-step:decide',
+      'request-step:complete',
     ]) {
       expect(PIC_ALLOWED_PERMISSIONS.has(code)).toBe(false);
     }

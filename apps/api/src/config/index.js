@@ -78,19 +78,9 @@ const configSchema = z.object({
   JWT_ACCESS_EXPIRY: z.string().min(1).default('15m'),
   JWT_REFRESH_EXPIRY: z.string().min(1).default('7d'),
 
-  // Stricter limit for the login endpoint specifically — a ceiling loose enough
-  // for browsing assets is far too loose for password attempts (§12.3).
-  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce
-    .number()
-    .int()
-    .positive()
-    .default(15 * 60 * 1000),
-  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
-
-  // Refresh is NOT a password-guessing surface, so it does not belong behind the
-  // login limiter. It is authenticated by a signed httpOnly cookie — there is
-  // nothing to brute-force — and every page load spends exactly one call, so the
-  // login ceiling of 10 logged a user out on their eleventh reload.
+  // Login has no rate limit at all (removed by request). Refresh is
+  // authenticated by a signed httpOnly cookie — there is nothing to
+  // brute-force — and every page load spends exactly one call.
   //
   // It still gets a limit: a stolen cookie replayed in a loop should not be free.
   // The ceiling is simply set where normal use cannot reach it.
@@ -135,6 +125,18 @@ const configSchema = z.object({
     }),
 
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'debug', 'silly']).optional(),
+
+  /**
+   * Request Updates baseline — P6 (`IMPLEMENTATION_PLAN.md` §64.6). Only
+   * activity after this moment can be an unseen update: history from before the
+   * feature is never presented as new, and nothing is backfilled. The default
+   * is the rollout day (business time); a deployment may set its own.
+   */
+  REQUEST_UPDATES_SINCE: z
+    .string()
+    .trim()
+    .datetime({ offset: true, message: 'must be an ISO date-time with an offset' })
+    .default('2026-09-29T00:00:00+07:00'),
 });
 
 /** Turns a ZodError into one readable, actionable message. */
@@ -193,10 +195,6 @@ function loadConfig(source = process.env) {
         .filter(Boolean),
       maxRequestBodyKb: env.MAX_REQUEST_BODY_KB,
       rateLimit: { windowMs: env.RATE_LIMIT_WINDOW_MS, max: env.RATE_LIMIT_MAX },
-      authRateLimit: {
-        windowMs: env.AUTH_RATE_LIMIT_WINDOW_MS,
-        max: env.AUTH_RATE_LIMIT_MAX,
-      },
       refreshRateLimit: {
         windowMs: env.REFRESH_RATE_LIMIT_WINDOW_MS,
         max: env.REFRESH_RATE_LIMIT_MAX,
@@ -213,6 +211,9 @@ function loadConfig(source = process.env) {
     // Flat rather than nested: it is one value with no siblings, and a
     // `calendar: { timeZone }` object would invent a grouping nothing else uses.
     businessTimeZone: env.BUSINESS_TIMEZONE,
+
+    // P6: the moment before which no request activity counts as an update.
+    requestUpdatesSince: new Date(env.REQUEST_UPDATES_SINCE),
 
     auth: {
       accessSecret: env.JWT_ACCESS_SECRET,

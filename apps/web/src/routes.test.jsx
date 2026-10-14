@@ -115,12 +115,32 @@ const PHASE_15_ROUTES = [
   ['/audit', 'audit-log:read'],
 ];
 
+/** Phase 36 (`CR-014`) — workflow configuration, `07-ui.md` §5.10. */
+const PHASE_36_ROUTES = [
+  ['/organization/workflows', 'workflow-definition:read'],
+  ['/organization/workflows/:id', 'workflow-definition:read'],
+];
+
+/** Phase 37 (`CR-014`) — request drafting, `07-ui.md` §5.10. */
+const PHASE_37_ROUTES = [
+  ['/requests', 'request:read'],
+  ['/requests/all', 'request:read'],
+  // Phase 38.
+  ['/requests/awaiting', 'request:read'],
+  ['/requests/updates', 'request:read'],
+  ['/requests/new', 'request:create'],
+  ['/requests/:id', 'request:read'],
+  ['/requests/:id/edit', 'request:update'],
+];
+
 const BUILT_ROUTES = [
   ...PHASE_11_ROUTES,
   ...PHASE_12_ROUTES,
   ...PHASE_13_ROUTES,
   ...PHASE_14_ROUTES,
   ...PHASE_15_ROUTES,
+  ...PHASE_36_ROUTES,
+  ...PHASE_37_ROUTES,
 ];
 
 describe('built routes', () => {

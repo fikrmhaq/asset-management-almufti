@@ -72,10 +72,20 @@ const inventoryCodeFormat = z
   })
   .strict();
 
+/**
+ * The Teacher Storage Room — REQ-REQUEST-023. One Location, stated whole;
+ * `null` clears it (not configured). Required, so an omitted `locationId` is an
+ * explicit error rather than a silent no-op.
+ */
+const teacherStorageRoom = z
+  .object({ locationId: z.string().uuid('must be a UUID').nullable() })
+  .strict();
+
 module.exports = {
   createInstitution,
   updateInstitution,
   listInstitutions,
   institutionParams,
   inventoryCodeFormat,
+  teacherStorageRoom,
 };
