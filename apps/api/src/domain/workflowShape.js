@@ -81,7 +81,12 @@ const WORKFLOW_TEMPLATES = Object.freeze(
       key: 'COMMON_COMMON_TEACHER',
       category: 'COMMON',
       requesterPositionCode: 'COMMON_TEACHER',
-      steps: [decide('WAKASEK_SARPRAS'), procure('INTERNAL', 'Q4'), register('Q4')],
+      steps: [
+        decide('WAKASEK_SARPRAS'),
+        decide('KEPALA_SEKOLAH'),
+        procure('INTERNAL', 'Q4'),
+        register('Q4'),
+      ],
     },
     {
       // Distribution to the Jurusan is the registered units' location and
@@ -92,6 +97,7 @@ const WORKFLOW_TEMPLATES = Object.freeze(
       steps: [
         decide('KAJUR'),
         decide('WAKASEK_SARPRAS'),
+        decide('KEPALA_SEKOLAH'),
         procure('INTERNAL', 'Q4'),
         register('Q4'),
       ],

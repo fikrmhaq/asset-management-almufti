@@ -431,8 +431,8 @@ describe('templates (CR-014 §6.5)', () => {
 
     expect(refused.status).toBe(400);
     expect(refused.body.error.details.map((detail) => detail.field)).toEqual([
-      'steps.1.actorPositionCode',
       'steps.2.actorPositionCode',
+      'steps.3.actorPositionCode',
     ]);
     expect(await statusesOf(COMMON_TEACHER)).toEqual(['v1:DRAFT']);
 

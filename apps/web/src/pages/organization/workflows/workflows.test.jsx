@@ -59,14 +59,15 @@ const TEMPLATES = [
     requesterPositionCode: 'COMMON_TEACHER',
     steps: [
       { sequence: 1, stepType: 'DECIDE', actorPositionCode: 'WAKASEK_SARPRAS' },
+      { sequence: 2, stepType: 'DECIDE', actorPositionCode: 'KEPALA_SEKOLAH' },
       {
-        sequence: 2,
+        sequence: 3,
         stepType: 'PROCURE',
         actorPositionCode: null,
         procurementMode: 'INTERNAL',
         unresolvedQuestion: 'Q4',
       },
-      { sequence: 3, stepType: 'REGISTER', actorPositionCode: null, unresolvedQuestion: 'Q4' },
+      { sequence: 4, stepType: 'REGISTER', actorPositionCode: null, unresolvedQuestion: 'Q4' },
     ],
   },
   {

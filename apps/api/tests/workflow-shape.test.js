@@ -234,10 +234,19 @@ describe('templates (CR-014 §6.5)', () => {
   });
 
   it.each([
-    ['COMMON_COMMON_TEACHER', ['DECIDE:WAKASEK_SARPRAS', 'PROCURE:?:INTERNAL', 'REGISTER:?']],
+    [
+      'COMMON_COMMON_TEACHER',
+      ['DECIDE:WAKASEK_SARPRAS', 'DECIDE:KEPALA_SEKOLAH', 'PROCURE:?:INTERNAL', 'REGISTER:?'],
+    ],
     [
       'COMMON_JURUSAN_TEACHER',
-      ['DECIDE:KAJUR', 'DECIDE:WAKASEK_SARPRAS', 'PROCURE:?:INTERNAL', 'REGISTER:?'],
+      [
+        'DECIDE:KAJUR',
+        'DECIDE:WAKASEK_SARPRAS',
+        'DECIDE:KEPALA_SEKOLAH',
+        'PROCURE:?:INTERNAL',
+        'REGISTER:?',
+      ],
     ],
     [
       'KBM_COMMON_TEACHER',
