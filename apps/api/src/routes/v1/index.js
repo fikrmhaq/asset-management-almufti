@@ -28,6 +28,7 @@ const { classificationsRouter } = require('../../modules/classifications/routes'
 const { attributeDefinitionsRouter } = require('../../modules/attributeDefinitions/routes');
 const { lookupRouter, referenceRouter } = require('../../modules/lookups/routes');
 const { assetsRouter } = require('../../modules/assets/routes');
+const { assetImportRouter } = require('../../modules/assetImport/routes');
 const { assetUnitsRouter } = require('../../modules/assetUnits/routes');
 const { assetUnitReportsRouter } = require('../../modules/assetUnitReports/routes');
 const { consumablesRouter } = require('../../modules/consumables/routes');
@@ -114,6 +115,9 @@ function v1Router(options = {}) {
   protectedRoutes.use('/reference', referenceRouter());
 
   // Asset core (§5)
+  // Ahead of `/assets`, so `import` is never read as an asset id. An addition
+  // beside the manual registration path, which is unchanged.
+  protectedRoutes.use('/assets/import', assetImportRouter());
   protectedRoutes.use('/assets', assetsRouter());
   protectedRoutes.use('/asset-units', assetUnitsRouter());
   // REQ-REQUEST-025: Room PIC reports and their review.

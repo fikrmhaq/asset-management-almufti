@@ -79,6 +79,9 @@ const AssetsPage = lazy(() =>
 const AssetFormPage = lazy(() =>
   import('@/pages/assets/AssetFormPage').then((m) => ({ default: m.AssetFormPage }))
 );
+const AssetImportPage = lazy(() =>
+  import('@/pages/assets/AssetImportPage').then((m) => ({ default: m.AssetImportPage }))
+);
 const AssetDetailPage = lazy(() =>
   import('@/pages/assets/AssetDetailPage').then((m) => ({ default: m.AssetDetailPage }))
 );
@@ -348,6 +351,14 @@ export const routeDefinitions = [
             permission: 'asset:create',
             element: <AssetFormPage />,
             crumb: 'crumbs.new',
+          }),
+          // Excel / CSV import — beside `new`, which is unchanged. Before `:id`
+          // so `import` is never read as an asset id.
+          screenRoute({
+            path: 'import',
+            permission: 'asset:create',
+            element: <AssetImportPage />,
+            crumb: 'crumbs.import',
           }),
           screenRoute({
             path: ':id',

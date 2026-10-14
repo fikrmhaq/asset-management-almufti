@@ -336,6 +336,7 @@ export const en = {
   crumbs: {
     home: 'Home',
     assets: 'Assets',
+    import: 'Import',
     assetUnits: 'Asset units',
     myRooms: 'My rooms',
     unitReports: 'Unit reports',
@@ -1694,6 +1695,83 @@ export const en = {
   },
 
   assets: {
+    import: {
+      title: 'Import assets',
+      description:
+        'Register many assets and units at once from an Excel or CSV file. Adding an asset by hand stays available.',
+      openImport: 'Import',
+      manualInstead: 'Add one by hand',
+      institutionTitle: 'Institution',
+      chooseInstitution: 'Choose the institution…',
+      step1Title: '1. Download the template',
+      step1Description:
+        "The template lists this institution's departments, funding sources and locations, and explains each column.",
+      downloadTemplate: 'Download template (.xlsx)',
+      step2Title: '2. Choose the filled file',
+      step2Description:
+        'An .xlsx or .csv file. It is checked straight away; nothing is saved until you import.',
+      chooseFile: 'Choose file',
+      chooseAnother: 'Choose another file',
+      checking: 'Checking the file…',
+      step3Title: '3. Review and import',
+      readyDescription:
+        'Every row is valid. These are the assets, units and inventory codes that will be created.',
+      problemsDescription:
+        'Fix these rows in the file and choose it again. Nothing is imported while any row has a problem.',
+      doneTitle: 'Imported',
+      doneDescription: 'The assets and units below have been registered.',
+      toAssets: 'Go to assets',
+      importButton: 'Import {{assets}} assets, {{units}} units',
+      imported: '{{assets}} assets and {{units}} units imported',
+      summaryRows: '{{count}} rows',
+      summaryAssets: '{{count}} assets',
+      summaryUnits: '{{count}} units',
+      issuesTitle: '{{count}} problems',
+      warningsTitle: 'Worth checking',
+      row: 'Row',
+      column: 'Column',
+      problem: 'Problem',
+      units: 'Units',
+      placement: 'Units per row',
+      codes: 'Inventory codes',
+      notPlaced: 'not placed yet',
+      nameExists: 'name already exists',
+      startOver: 'Start over',
+      issues: {
+        REQUIRED: 'Required',
+        TOO_LONG: 'Too long (at most {{max}} characters)',
+        CLASSIFICATION_NOT_FOUND: 'No most specific classification is called "{{value}}"',
+        CLASSIFICATION_AMBIGUOUS:
+          'Several classifications are called "{{value}}"; use the 12-digit code ({{codes}})',
+        QUANTITY_INVALID: 'Must be a whole number from 1 to {{max}}',
+        DEPARTMENT_NOT_FOUND: 'No department of this institution is "{{value}}"',
+        DEPARTMENT_AMBIGUOUS: '"{{value}}" matches several departments; use the code',
+        FUNDING_SOURCE_NOT_FOUND: 'No funding source is "{{value}}"',
+        FUNDING_SOURCE_AMBIGUOUS: '"{{value}}" matches several funding sources; use the code',
+        FUNDING_SOURCE_NO_CODE:
+          "\"{{value}}\" has no code, and this institution's inventory codes include it",
+        FUNDING_SOURCE_REQUIRED:
+          "Required: this institution's inventory codes include the funding source",
+        LOCATION_NOT_FOUND: 'No active location of this institution is called "{{value}}"',
+        LOCATION_AMBIGUOUS: 'Several active locations are called "{{value}}"',
+        CONDITION_INVALID:
+          '"{{value}}" is not a condition: use Good, Fair, Poor, Damaged or Unserviceable',
+        CONDITION_REQUIRED: 'Required when a location is given',
+        LOCATION_REQUIRED: 'Required when a condition is given',
+        ASSET_EXISTS:
+          'An asset called "{{value}}" with this classification already exists; import will create a new one',
+        UNKNOWN_COLUMN: 'The column "{{value}}" is not recognised and will be ignored',
+        NO_INSTITUTION: 'Choose the institution the assets are registered to',
+        FILE_TYPE: 'The file must be an Excel workbook (.xlsx) or a CSV',
+        FILE_UNREADABLE: 'The file could not be read',
+        MISSING_COLUMNS: 'The file has no {{columns}} column',
+        NO_ROWS: 'The file has no rows to import',
+        TOO_MANY_ROWS: 'At most {{max}} rows can be imported at once',
+        TOO_MANY_UNITS: 'At most {{max}} units can be imported at once; this file has {{count}}',
+        NO_HISTORY_PERMISSION:
+          'Recording a location and condition needs permission to record unit history; leave Lokasi and Kondisi empty, or ask an administrator',
+      },
+    },
     list: {
       title: 'Assets',
       searchPlaceholder: 'Name or description…',

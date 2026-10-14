@@ -120,11 +120,22 @@ export function AssetsPage() {
         // unit to an asset they can see — a standalone asset would be out of
         // their reach at once, and the server refuses it.
         assetScope.data?.createStandaloneAsset === false ? null : (
-          <Can code="asset:create">
-            <Button asChild>
-              <Link to="/assets/new">New asset</Link>
-            </Button>
-          </Can>
+          <>
+            {/* Excel / CSV import — an addition beside "New asset". It needs
+                both codes the manual path needs. */}
+            <Can code="asset:create">
+              <Can code="asset-unit:create">
+                <Button variant="outline" asChild>
+                  <Link to="/assets/import">{t('assets.import.openImport')}</Link>
+                </Button>
+              </Can>
+            </Can>
+            <Can code="asset:create">
+              <Button asChild>
+                <Link to="/assets/new">New asset</Link>
+              </Button>
+            </Can>
+          </>
         )
       }
       filters={

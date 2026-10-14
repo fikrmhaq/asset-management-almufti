@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, apiClient } from './client';
 import { createResourceApi } from './resources';
 
 /**
@@ -23,6 +23,32 @@ export const assetsApi = {
   replaceAttributeValues: (id, values) => api.put(`/assets/${id}/attribute-values`, { values }),
   listAttachments: (id) => api.get(`/assets/${id}/attachments`),
   uploadAttachment: (id, formData) => api.upload(`/assets/${id}/attachments`, formData),
+};
+
+/**
+ * Asset import from Excel / CSV — an addition beside manual registration, which
+ * is unchanged. The preview writes nothing; the import is all or nothing.
+ */
+const importForm = (file, institutionId) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (institutionId) formData.append('institutionId', institutionId);
+  return formData;
+};
+
+export const assetImportApi = {
+  /** The .xlsx to fill in, named by the server, with the institution's references. */
+  template: async (institutionId) => {
+    const response = await apiClient.get('/assets/import/template', {
+      params: institutionId ? { institutionId } : undefined,
+      responseType: 'blob',
+    });
+    const match = /filename="([^"]+)"/.exec(response.headers['content-disposition'] ?? '');
+    return { blob: response.data, filename: match?.[1] ?? 'templat-impor-aset.xlsx' };
+  },
+  preview: (file, institutionId) =>
+    api.upload('/assets/import/preview', importForm(file, institutionId)),
+  import: (file, institutionId) => api.upload('/assets/import', importForm(file, institutionId)),
 };
 
 /**
